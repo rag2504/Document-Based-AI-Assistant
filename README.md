@@ -141,8 +141,14 @@ cp .env.example .env
 
 **Start the backend:**
 
+```powershell
+.\venv\Scripts\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
+```
+
+On macOS/Linux:
+
 ```bash
-uvicorn app:app --reload --port 8000
+./venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 The API will be live at: `http://localhost:8000`
