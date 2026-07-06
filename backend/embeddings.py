@@ -5,7 +5,7 @@ from google import genai
 
 logger = logging.getLogger(__name__)
 
-EMBEDDING_MODEL = "text-embedding-004"
+EMBEDDING_MODEL = "gemini-embedding-001"
 
 
 class EmbeddingModel:
