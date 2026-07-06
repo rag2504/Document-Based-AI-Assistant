@@ -1,88 +1,172 @@
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Copy, Check, Bot, User } from 'lucide-react';
-import SourceAccordion from './SourceAccordion';
+import { Copy, Check, ThumbsUp, ThumbsDown, RefreshCw, User } from 'lucide-react';
+import SourcePanel from './SourcePanel';
 
-export default function MessageBubble({ message }) {
+export default function MessageBubble({ message, onRegenerate, isStreaming }) {
   const { role, content, sources, timestamp } = message;
   const isUser = role === 'user';
   const [copied, setCopied] = useState(false);
+  const [reaction, setReaction] = useState(null); // 'up' | 'down'
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(content);
+    navigator.clipboard.writeText(content).catch(() => {});
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
-  return (
-    <div className={`flex w-full gap-3 py-4 px-4 ${isUser ? 'justify-end bg-white' : 'justify-start bg-gray-55/30 border-y border-gray-100/50'}`}>
-      <div className={`flex w-full max-w-3xl gap-4 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
-        
-        {/* Avatar */}
-        <div className={`flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-lg shadow-sm border
-          ${isUser 
-            ? 'bg-blue-600 border-blue-500 text-white' 
-            : 'bg-white border-gray-200 text-gray-700'
-          }`}
-        >
-          {isUser ? <User className="h-4.5 w-4.5" /> : <Bot className="h-4.5 w-4.5 text-blue-600" />}
-        </div>
+  const formatTime = (iso) => {
+    try {
+      return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return '';
+    }
+  };
 
-        {/* Message Content Container */}
-        <div className="flex-1 overflow-hidden">
-          
-          {/* Header name / timestamp */}
-          <div className="flex items-baseline gap-2 mb-1">
-            <span className="text-xs font-bold text-gray-800">
-              {isUser ? 'You' : 'Document AI'}
-            </span>
-            <span className="text-[10px] text-gray-400">
-              {new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+  if (isUser) {
+    return (
+      <div style={{
+        display: 'flex', justifyContent: 'flex-end',
+        alignItems: 'flex-end', gap: '10px',
+      }}>
+        <div style={{ maxWidth: '80%' }}>
+          {/* Timestamp */}
+          <div style={{ textAlign: 'right', marginBottom: '4px' }}>
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+              {formatTime(timestamp)}
             </span>
           </div>
+          {/* Bubble */}
+          <div className="user-bubble">
+            <p style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              {content}
+            </p>
+          </div>
+        </div>
 
-          {/* Message Text Bubble */}
-          <div className={`text-sm text-gray-800 leading-relaxed select-text
-            ${isUser ? 'font-medium' : 'prose prose-sm max-w-none text-gray-850'}`}
-          >
-            {isUser ? (
-              <p className="whitespace-pre-wrap">{content}</p>
-            ) : (
-              <div className="markdown-content">
-                <ReactMarkdown>{content}</ReactMarkdown>
-              </div>
+        {/* Avatar */}
+        <div style={{
+          width: '32px', height: '32px', borderRadius: '10px',
+          background: 'linear-gradient(135deg, #2563EB, #3B82F6)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0, boxShadow: '0 2px 8px rgba(37,99,235,0.25)',
+        }}>
+          <User size={16} color="white" />
+        </div>
+      </div>
+    );
+  }
+
+  // ── AI message ──
+  return (
+    <div className="ai-message-wrapper" style={{
+      display: 'flex', alignItems: 'flex-start', gap: '10px',
+    }}>
+      {/* Avatar */}
+      <div style={{
+        width: '32px', height: '32px', borderRadius: '10px',
+        background: 'var(--surface)',
+        border: '1px solid var(--border)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        flexShrink: 0, boxShadow: 'var(--shadow-xs)',
+        fontSize: '16px', lineHeight: 1,
+      }}>
+        ✦
+      </div>
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {/* Name + time */}
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '6px' }}>
+          <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
+            DocAI
+          </span>
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+            {formatTime(timestamp)}
+          </span>
+        </div>
+
+        {/* Content card */}
+        <div className={`ai-card ${isStreaming ? 'streaming-cursor' : ''}`}>
+          {content ? (
+            <div className="prose-content">
+              <ReactMarkdown
+                components={{
+                  code({ node, inline, className, children, ...props }) {
+                    if (inline) {
+                      return <code {...props}>{children}</code>;
+                    }
+                    const lang = (className || '').replace('language-', '');
+                    return (
+                      <div>
+                        {lang && (
+                          <div className="code-block-header">
+                            <span>{lang}</span>
+                          </div>
+                        )}
+                        <pre style={{ margin: 0 }}>
+                          <code {...props}>{children}</code>
+                        </pre>
+                      </div>
+                    );
+                  },
+                }}
+              >
+                {content}
+              </ReactMarkdown>
+            </div>
+          ) : (
+            isStreaming && (
+              <div style={{ height: '20px' }} />
+            )
+          )}
+        </div>
+
+        {/* Sources */}
+        {sources && sources.length > 0 && !isStreaming && (
+          <SourcePanel sources={sources} />
+        )}
+
+        {/* Action toolbar */}
+        {content && !isStreaming && (
+          <div className="msg-actions">
+            <button
+              onClick={handleCopy}
+              className="msg-action-btn"
+              title="Copy response"
+            >
+              {copied ? (
+                <><Check size={13} style={{ color: '#10B981' }} /><span style={{ color: '#10B981' }}>Copied</span></>
+              ) : (
+                <><Copy size={13} /><span>Copy</span></>
+              )}
+            </button>
+
+            <button
+              onClick={() => setReaction(reaction === 'up' ? null : 'up')}
+              className="msg-action-btn"
+              title="Good response"
+              style={reaction === 'up' ? { color: '#10B981', borderColor: '#10B981', background: '#F0FDF4' } : {}}
+            >
+              <ThumbsUp size={13} />
+            </button>
+
+            <button
+              onClick={() => setReaction(reaction === 'down' ? null : 'down')}
+              className="msg-action-btn"
+              title="Bad response"
+              style={reaction === 'down' ? { color: '#EF4444', borderColor: '#EF4444', background: '#FEF2F2' } : {}}
+            >
+              <ThumbsDown size={13} />
+            </button>
+
+            {onRegenerate && (
+              <button onClick={onRegenerate} className="msg-action-btn" title="Regenerate">
+                <RefreshCw size={13} />
+                <span>Regenerate</span>
+              </button>
             )}
           </div>
-
-          {/* Citations & Source Accordion */}
-          {!isUser && sources && sources.length > 0 && (
-            <SourceAccordion sources={sources} />
-          )}
-
-          {/* Copy Button & Action panel */}
-          {!isUser && content && (
-            <div className="mt-2.5 flex items-center justify-start gap-2">
-              <button
-                onClick={handleCopy}
-                className="flex items-center gap-1 text-[10px] font-bold text-gray-400 hover:text-gray-600 bg-white border border-gray-150 rounded px-2 py-1 shadow-sm active:scale-95 transition-all"
-                title="Copy response to clipboard"
-              >
-                {copied ? (
-                  <>
-                    <Check className="h-3 w-3 text-green-500" />
-                    <span className="text-green-600">Copied!</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="h-3 w-3" />
-                    <span>Copy</span>
-                  </>
-                )}
-              </button>
-            </div>
-          )}
-
-        </div>
+        )}
       </div>
     </div>
   );

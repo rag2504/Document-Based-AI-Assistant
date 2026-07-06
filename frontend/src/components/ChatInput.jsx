@@ -1,75 +1,148 @@
-import React, { useRef, useEffect } from 'react';
-import { Send, CornerDownLeft } from 'lucide-react';
+import React, { useRef, useEffect, useState } from 'react';
+import { Send, Paperclip, CornerDownLeft } from 'lucide-react';
 
-export default function ChatInput({ value, onChange, onSubmit, disabled, placeholder }) {
+export default function ChatInput({
+  value,
+  onChange,
+  onSubmit,
+  disabled,
+  placeholder,
+  onAttach,
+}) {
   const textareaRef = useRef(null);
+  const fileInputRef = useRef(null);
 
-  // Auto-resize the input height
+  // Auto-resize textarea
   useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 160)}px`;
+    const el = textareaRef.current;
+    if (el) {
+      el.style.height = 'auto';
+      el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
     }
   }, [value]);
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      if (value.trim() && !disabled) {
-        onSubmit();
-      }
+      if (value.trim() && !disabled) onSubmit();
     }
   };
 
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (value.trim() && !disabled) onSubmit();
+  };
+
+  const canSend = value.trim().length > 0 && !disabled;
+  const charCount = value.length;
+  const showCharCount = charCount > 400;
+
   return (
-    <div className="relative border-t border-gray-150 bg-white px-4 py-4 sm:px-6">
-      <div className="mx-auto max-w-3xl">
-        <form 
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (value.trim() && !disabled) onSubmit();
-          }}
-          className="relative flex items-center rounded-xl border border-gray-250 bg-white px-3 py-2 shadow-soft focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100 transition-all"
-        >
-          {/* Text Area Input */}
+    <div className="chat-input-bar">
+      <form onSubmit={handleSubmit}>
+        <div className={`chat-input-wrapper ${disabled ? 'loading-state' : ''}`}>
+          {/* Attachment button */}
+          {onAttach && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.txt"
+                style={{ display: 'none' }}
+                onChange={(e) => { if (e.target.files?.[0]) onAttach(e.target.files[0]); }}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={disabled}
+                style={{
+                  flexShrink: 0, background: 'none', border: 'none',
+                  cursor: disabled ? 'not-allowed' : 'pointer',
+                  color: 'var(--text-muted)', padding: '4px',
+                  borderRadius: '7px', transition: 'color 0.15s',
+                  display: 'flex', alignItems: 'center',
+                }}
+                onMouseOver={(e) => { if (!disabled) e.currentTarget.style.color = 'var(--primary)'; }}
+                onMouseOut={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
+                title="Attach document"
+              >
+                <Paperclip size={17} />
+              </button>
+            </>
+          )}
+
+          {/* Text area */}
           <textarea
             ref={textareaRef}
             rows={1}
             value={value}
             onChange={(e) => onChange(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={placeholder || "Ask a question about the document..."}
+            placeholder={disabled ? 'Generating response…' : (placeholder || 'Ask a question about the document…')}
             disabled={disabled}
-            className="block w-full resize-none border-0 bg-transparent py-1.5 pr-12 text-gray-900 placeholder-gray-400 focus:ring-0 sm:text-sm outline-none max-h-40 min-h-[24px]"
+            className="chat-textarea"
+            aria-label="Chat input"
           />
 
-          {/* Buttons and Indicator */}
-          <div className="absolute right-2.5 bottom-2 flex items-center gap-1.5">
+          {/* Right side: char count + send */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+            {showCharCount && (
+              <span style={{
+                fontSize: '11px', color: charCount > 900 ? '#EF4444' : 'var(--text-muted)',
+                fontWeight: 500,
+              }}>
+                {charCount}
+              </span>
+            )}
+
             {/* Keyboard hint */}
-            <span className="hidden sm:inline-flex items-center gap-0.5 text-[9px] font-bold text-gray-400 select-none mr-1">
-              <span>Enter</span>
-              <CornerDownLeft className="h-2 w-2" />
-            </span>
-            
+            {!disabled && value.trim() && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: '2px',
+                fontSize: '10px', color: 'var(--text-muted)',
+                border: '1px solid var(--border)', borderRadius: '5px',
+                padding: '2px 5px',
+              }} className="hide-mobile">
+                <span>Enter</span>
+                <CornerDownLeft size={10} />
+              </div>
+            )}
+
+            {/* Send button */}
             <button
               type="submit"
-              disabled={!value.trim() || disabled}
-              className={`flex h-8 w-8 items-center justify-center rounded-lg shadow-sm transition-all active:scale-95
-                ${value.trim() && !disabled
-                  ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-500/10'
-                  : 'bg-gray-100 text-gray-400 border border-gray-150 cursor-not-allowed'
-                }`}
+              disabled={!canSend}
+              className={`send-btn ${canSend ? 'btn-gradient' : ''}`}
+              aria-label="Send message"
+              title="Send (Enter)"
             >
-              <Send className="h-4 w-4" />
+              {disabled ? (
+                <span style={{
+                  width: '16px', height: '16px', borderRadius: '50%',
+                  border: '2px solid var(--text-muted)',
+                  borderTopColor: 'transparent',
+                  animation: 'spin 0.7s linear infinite',
+                  display: 'block',
+                }} />
+              ) : (
+                <Send size={16} color={canSend ? 'white' : 'var(--text-muted)'} />
+              )}
             </button>
           </div>
-        </form>
-        
-        {/* Footnote instruction */}
-        <p className="mt-1.5 text-center text-[10px] text-gray-400">
-          Answers are generated strictly using the document. AI will tell you if information is missing.
-        </p>
-      </div>
+        </div>
+      </form>
+
+      {/* Footer hint */}
+      <p style={{
+        marginTop: '8px', textAlign: 'center',
+        fontSize: '11.5px', color: 'var(--text-muted)',
+      }}>
+        Answers are grounded strictly in the document. AI will indicate if information is unavailable.
+      </p>
+
+      <style>{`
+        @media (max-width: 480px) { .hide-mobile { display: none; } }
+      `}</style>
     </div>
   );
 }

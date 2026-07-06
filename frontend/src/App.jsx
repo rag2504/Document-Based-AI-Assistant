@@ -1,11 +1,12 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import axios from 'axios';
-import Navbar from './components/Navbar';
-import EmptyState from './components/EmptyState';
-import UploadArea from './components/UploadArea';
-import UploadProgress from './components/UploadProgress';
-import ChatWindow from './components/ChatWindow';
+import Sidebar from './components/Sidebar';
+import Header from './components/Header';
+import WelcomeScreen from './components/WelcomeScreen';
+import ChatArea from './components/ChatArea';
 import ChatInput from './components/ChatInput';
+import { useTheme } from './hooks/useTheme';
+import { useConversations } from './hooks/useConversations';
 
 const API_BASE = 'http://localhost:8000';
 
@@ -13,23 +14,78 @@ function generateId() {
   return Math.random().toString(36).substring(2, 10);
 }
 
+// ── Persist sidebar state ──
+function getSidebarDefault() {
+  try {
+    const stored = localStorage.getItem('docai_sidebar_open');
+    if (stored !== null) return stored === 'true';
+  } catch { /* ignore */ }
+  return window.innerWidth >= 768;
+}
+
+// ── Persist active document state ──
+function getStoredDocument() {
+  try {
+    return JSON.parse(localStorage.getItem('docai_active_doc') || 'null');
+  } catch { return null; }
+}
+
+function storeDocument(doc) {
+  try {
+    localStorage.setItem('docai_active_doc', doc ? JSON.stringify(doc) : 'null');
+  } catch { /* ignore */ }
+}
+
 export default function App() {
-  const [activeFile, setActiveFile] = useState(null);
+  const { theme, toggleTheme } = useTheme();
+  const {
+    conversations, activeConversation, activeId,
+    createNewChat, addMessage, updateLastAssistantMessage,
+    clearMessages, deleteConversation, renameConversation,
+    switchConversation, setDocumentName,
+  } = useConversations();
+
+  const [sidebarOpen, setSidebarOpen] = useState(getSidebarDefault);
+
+  // Document state
+  const [activeDoc, setActiveDoc] = useState(() => getStoredDocument());
   const [uploadStatus, setUploadStatus] = useState('idle'); // idle | uploading | indexing | success | error
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState(null);
-  const [pendingFile, setPendingFile] = useState(null);
+  const [uploadedAt, setUploadedAt] = useState(null);
 
-  const [messages, setMessages] = useState([]);
+  // Chat state
   const [inputValue, setInputValue] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
+  const [streamingMessageId, setStreamingMessageId] = useState(null);
 
-  // ── File Upload Handler ───────────────────────────────────────────────
+  // Persist sidebar state
+  useEffect(() => {
+    try { localStorage.setItem('docai_sidebar_open', sidebarOpen); } catch { /* ignore */ }
+  }, [sidebarOpen]);
+
+  // Persist active document
+  useEffect(() => {
+    storeDocument(activeDoc);
+  }, [activeDoc]);
+
+  // Messages from active conversation
+  const messages = activeConversation?.messages || [];
+  const activeFilename = activeDoc?.filename || null;
+
+  // ── Ensure there's always an active conversation if we have a document ──
+  const ensureConversation = useCallback(() => {
+    if (!activeId) {
+      return createNewChat(activeFilename);
+    }
+    return activeId;
+  }, [activeId, createNewChat, activeFilename]);
+
+  // ── File Upload ──
   const handleFileSelect = useCallback(async (file) => {
     setUploadStatus('uploading');
     setUploadProgress(0);
     setUploadError(null);
-    setPendingFile(file);
 
     const formData = new FormData();
     formData.append('file', file);
@@ -37,21 +93,29 @@ export default function App() {
     try {
       const response = await axios.post(`${API_BASE}/upload`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
-        onUploadProgress: (progressEvent) => {
-          const pct = Math.round((progressEvent.loaded * 100) / (progressEvent.total || file.size));
+        onUploadProgress: (event) => {
+          const pct = Math.round((event.loaded * 100) / (event.total || file.size));
           setUploadProgress(Math.min(pct, 95));
         },
       });
 
       setUploadStatus('indexing');
-      // Give a brief moment so user can see the indexing phase visually
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 600));
       setUploadProgress(100);
 
       if (response.data.success) {
         setUploadStatus('success');
-        setActiveFile(response.data.filename);
-        setMessages([]); // Reset chat on new document
+        const doc = {
+          filename: response.data.filename,
+          chunks: response.data.chunks,
+          uploadedAt: new Date().toISOString(),
+        };
+        setActiveDoc(doc);
+        setUploadedAt(doc.uploadedAt);
+
+        // Create or update active conversation with document name
+        const convId = activeId || createNewChat(response.data.filename);
+        if (activeId) setDocumentName(response.data.filename);
       } else {
         throw new Error('Upload failed on the server.');
       }
@@ -60,42 +124,62 @@ export default function App() {
       setUploadStatus('error');
       setUploadError(msg);
     }
-  }, []);
+  }, [activeId, createNewChat, setDocumentName]);
 
-  // ── Reset / Clear Document ────────────────────────────────────────────
+  // ── Reset / Replace Document ──
   const handleReset = useCallback(async () => {
-    try {
-      await axios.post(`${API_BASE}/clear`);
-    } catch (_) { /* ignore */ }
-    setActiveFile(null);
+    try { await axios.post(`${API_BASE}/clear`); } catch { /* ignore */ }
+    setActiveDoc(null);
     setUploadStatus('idle');
     setUploadProgress(0);
     setUploadError(null);
-    setPendingFile(null);
-    setMessages([]);
+    setUploadedAt(null);
     setInputValue('');
+    storeDocument(null);
   }, []);
 
-  // ── Chat Submit Handler (SSE Streaming) ───────────────────────────────
-  const handleChatSubmit = useCallback(async () => {
-    if (!inputValue.trim() || isChatLoading) return;
+  // ── Chat Submit (SSE Streaming) ──
+  const handleChatSubmit = useCallback(async (overrideQuestion) => {
+    const question = (overrideQuestion || inputValue).trim();
+    if (!question || isChatLoading) return;
 
-    const question = inputValue.trim();
+    // Ensure we have an active conversation
+    let convId = activeId;
+    if (!convId) convId = createNewChat(activeFilename);
+
     setInputValue('');
     setIsChatLoading(true);
 
-    // Add user message immediately
-    const userMsg = { id: generateId(), role: 'user', content: question, timestamp: new Date().toISOString() };
-    setMessages((prev) => [...prev, userMsg]);
+    // Add user message
+    const userMsg = {
+      id: generateId(),
+      role: 'user',
+      content: question,
+      timestamp: new Date().toISOString(),
+    };
+    addMessage(userMsg);
 
-    // Prepare placeholder for AI response (built up from stream)
+    // Placeholder AI message
     const assistantId = generateId();
+    setStreamingMessageId(assistantId);
+
+    const assistantMsg = {
+      id: assistantId,
+      role: 'assistant',
+      content: '',
+      sources: [],
+      timestamp: new Date().toISOString(),
+    };
+
+    // Small delay so typing indicator shows briefly
+    await new Promise((r) => setTimeout(r, 120));
+    addMessage(assistantMsg);
 
     try {
       const response = await fetch(`${API_BASE}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, filename: activeFile, stream: true }),
+        body: JSON.stringify({ question, filename: activeFilename, stream: true }),
       });
 
       if (!response.ok) {
@@ -106,14 +190,7 @@ export default function App() {
       const reader = response.body.getReader();
       const decoder = new TextDecoder('utf-8');
       let buffer = '';
-      let sources = [];
       let answerText = '';
-
-      // Insert empty AI message bubble to start building into
-      setMessages((prev) => [
-        ...prev,
-        { id: assistantId, role: 'assistant', content: '', sources: [], timestamp: new Date().toISOString() },
-      ]);
 
       while (true) {
         const { done, value } = await reader.read();
@@ -121,122 +198,176 @@ export default function App() {
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
-        buffer = lines.pop(); // Keep partial line in buffer
+        buffer = lines.pop();
 
         for (const line of lines) {
-          if (line.startsWith('event: sources')) {
-            // Next data line will be sources JSON
-          } else if (line.startsWith('event: text')) {
-            // Next data line will be a text token
-          } else if (line.startsWith('event: end')) {
-            // Stream finished
-          } else if (line.startsWith('data: ')) {
-            const data = line.slice(6); // Remove 'data: '
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
             if (data === '[DONE]') break;
 
-            // Detect if this is the sources payload (JSON array) or a text chunk
             if (data.startsWith('[') || data.startsWith('{')) {
               try {
                 const parsed = JSON.parse(data);
                 if (Array.isArray(parsed)) {
-                  sources = parsed;
-                  // Update sources on message immediately
-                  setMessages((prev) =>
-                    prev.map((m) =>
-                      m.id === assistantId ? { ...m, sources } : m
-                    )
-                  );
+                  updateLastAssistantMessage((m) => ({ ...m, sources: parsed }));
                 }
-              } catch (_) {
-                // Not valid JSON; treat as regular text
+              } catch {
                 answerText += data;
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === assistantId ? { ...m, content: answerText } : m
-                  )
-                );
+                updateLastAssistantMessage((m) => ({ ...m, content: answerText }));
               }
             } else {
               answerText += data;
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId ? { ...m, content: answerText } : m
-                )
-              );
+              updateLastAssistantMessage((m) => ({ ...m, content: answerText }));
             }
           }
         }
       }
     } catch (err) {
       const errorMsg = err.message || 'Something went wrong. Please try again.';
-      setMessages((prev) => {
-        const exists = prev.find((m) => m.id === assistantId);
-        if (exists) {
-          return prev.map((m) =>
-            m.id === assistantId
-              ? { ...m, content: `⚠️ Error: ${errorMsg}` }
-              : m
-          );
-        }
-        return [
-          ...prev,
-          { id: assistantId, role: 'assistant', content: `⚠️ Error: ${errorMsg}`, sources: [], timestamp: new Date().toISOString() },
-        ];
-      });
+      updateLastAssistantMessage((m) => ({
+        ...m,
+        content: `⚠️ **Error:** ${errorMsg}`,
+      }));
     } finally {
       setIsChatLoading(false);
+      setStreamingMessageId(null);
     }
-  }, [inputValue, isChatLoading, activeFile]);
+  }, [inputValue, isChatLoading, activeId, activeFilename, createNewChat, addMessage, updateLastAssistantMessage]);
 
-  // ── Clear Chat History ────────────────────────────────────────────────
-  const handleClearHistory = useCallback(() => {
-    setMessages([]);
-  }, []);
+  // ── Regenerate last response ──
+  const handleRegenerate = useCallback(() => {
+    // Find last user message and re-submit
+    const lastUser = [...messages].reverse().find((m) => m.role === 'user');
+    if (lastUser && !isChatLoading) {
+      // Remove the last assistant message
+      // We achieve this by just resubmitting; the updateLastAssistantMessage will overwrite
+      handleChatSubmit(lastUser.content);
+    }
+  }, [messages, isChatLoading, handleChatSubmit]);
 
-  // ── Render ────────────────────────────────────────────────────────────
-  const showChat = activeFile && uploadStatus === 'success';
+  // ── New Chat ──
+  const handleNewChat = useCallback(() => {
+    createNewChat(activeFilename);
+  }, [createNewChat, activeFilename]);
+
+  // ── Clear current chat ──
+  const handleClearChat = useCallback(() => {
+    clearMessages();
+  }, [clearMessages]);
+
+  // ── Download chat as Markdown ──
+  const handleDownloadChat = useCallback(() => {
+    if (!messages.length) return;
+    let md = `# Chat Transcript – Document AI Assistant\n`;
+    md += `**Document:** ${activeFilename || 'Unknown'}\n`;
+    md += `**Date:** ${new Date().toLocaleString()}\n\n---\n\n`;
+
+    messages.forEach((msg) => {
+      const time = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      if (msg.role === 'user') {
+        md += `### 👤 You (${time})\n\n${msg.content}\n\n`;
+      } else {
+        md += `### ✦ DocAI (${time})\n\n${msg.content}\n\n`;
+        if (msg.sources?.length) {
+          md += `**Sources:**\n`;
+          msg.sources.forEach((s) => {
+            md += `- Page ${s.page} · Chunk ${s.chunk_id?.split('_')?.pop() || s.chunk_id}: *"${s.text?.slice(0, 200)}"*\n`;
+          });
+          md += '\n';
+        }
+        md += `---\n\n`;
+      }
+    });
+
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `chat_${(activeFilename || 'transcript').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.md`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [messages, activeFilename]);
+
+  const showChat = activeDoc && uploadStatus === 'success';
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
-      <Navbar activeFile={activeFile} onReset={handleReset} />
+    <div className="main-layout" data-theme={theme}>
+      {/* ── Sidebar ── */}
+      <Sidebar
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        conversations={conversations}
+        activeId={activeId}
+        onNewChat={handleNewChat}
+        onSwitchChat={(id) => { switchConversation(id); setSidebarOpen(false); }}
+        onDeleteChat={deleteConversation}
+        onRenameChat={renameConversation}
+        activeDocument={activeFilename}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+      />
 
-      <main className="flex-1 flex flex-col">
+      {/* ── Main content ── */}
+      <div
+        className={`main-content ${sidebarOpen ? '' : 'sidebar-collapsed'}`}
+        style={{
+          marginLeft: sidebarOpen ? '280px' : '0',
+          transition: 'margin-left 0.3s cubic-bezier(0.4,0,0.2,1)',
+        }}
+      >
+        {/* Header */}
+        <Header
+          onToggleSidebar={() => setSidebarOpen((v) => !v)}
+          activeDocument={activeFilename}
+          onNewChat={handleNewChat}
+          onClearChat={handleClearChat}
+          onDownloadChat={handleDownloadChat}
+          hasMessages={messages.length > 0}
+          theme={theme}
+          onToggleTheme={toggleTheme}
+        />
+
+        {/* Page content */}
         {!showChat ? (
-          /* ── Landing / Upload View ── */
-          <EmptyState>
-            <div className="space-y-4">
-              <UploadArea onFileSelect={handleFileSelect} isUploading={uploadStatus === 'uploading' || uploadStatus === 'indexing'} />
-
-              {uploadStatus !== 'idle' && (
-                <UploadProgress
-                  status={uploadStatus}
-                  progress={uploadProgress}
-                  filename={pendingFile?.name || ''}
-                  error={uploadError}
-                  onRetry={handleReset}
-                />
-              )}
-            </div>
-          </EmptyState>
+          <WelcomeScreen
+            onFileSelect={handleFileSelect}
+            onSuggestedPrompt={(prompt) => {
+              // If we have a document ready, switch to chat and submit
+              if (activeDoc && uploadStatus === 'success') {
+                setInputValue(prompt);
+              }
+            }}
+            uploadStatus={uploadStatus}
+            uploadProgress={uploadProgress}
+            uploadError={uploadError}
+            onRetry={handleReset}
+          />
         ) : (
-          /* ── Chat View ── */
-          <div className="flex flex-col flex-1 mx-auto w-full max-w-5xl px-4 sm:px-6 lg:px-8 py-4 gap-3">
-            <ChatWindow
+          <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 64px)' }}>
+            <ChatArea
               messages={messages}
-              loading={isChatLoading}
-              onClearHistory={handleClearHistory}
-              activeFilename={activeFile}
+              isChatLoading={isChatLoading}
+              streamingMessageId={streamingMessageId}
+              activeFilename={activeFilename}
+              uploadChunks={activeDoc?.chunks}
+              uploadedAt={activeDoc?.uploadedAt}
+              onSuggestedPrompt={(prompt) => handleChatSubmit(prompt)}
+              onRegenerate={handleRegenerate}
+              onReplace={handleReset}
             />
             <ChatInput
               value={inputValue}
               onChange={setInputValue}
               onSubmit={handleChatSubmit}
               disabled={isChatLoading}
-              placeholder={`Ask a question about "${activeFile}"...`}
+              placeholder={`Ask a question about "${activeFilename}"…`}
+              onAttach={handleFileSelect}
             />
           </div>
         )}
-      </main>
+      </div>
     </div>
   );
 }
