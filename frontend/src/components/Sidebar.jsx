@@ -231,7 +231,7 @@ export default function Sidebar({
         </div>
 
         {/* ── New Chat ── */}
-        <button className="sidebar-new-btn" onClick={onNewChat} aria-label="New chat">
+        <button className="sidebar-new-btn" onClick={() => { onNewChat(); if (isMobile) onClose(); }} aria-label="New chat">
           <Plus size={14} />
           New chat
         </button>

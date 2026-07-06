@@ -34,18 +34,21 @@ export function useConversations(initialConversations = []) {
   const setServerData = useCallback((serverConversations) => {
     setConversations(serverConversations);
     
-    // Check if the saved active ID exists in the fetched list
-    const isValid = serverConversations.some((c) => c.id === activeId);
-    
-    if (serverConversations.length > 0) {
-      if (!activeId || !isValid) {
-        // Fallback to the most recent conversation
-        setActiveId(serverConversations[0].id);
+    setActiveId(currentActiveId => {
+      // Check if the saved active ID exists in the fetched list
+      const isValid = serverConversations.some((c) => c.id === currentActiveId);
+      
+      if (serverConversations.length > 0) {
+        if (!currentActiveId || !isValid) {
+          // Fallback to the most recent conversation
+          return serverConversations[0].id;
+        }
+      } else {
+        return null;
       }
-    } else {
-      setActiveId(null);
-    }
-  }, [activeId]);
+      return currentActiveId;
+    });
+  }, []);
 
   // Create a new empty conversation
   const createNewChat = useCallback((documentName = null) => {

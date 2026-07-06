@@ -1,40 +1,33 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { motion } from 'framer-motion';
-import { Network, HelpCircle } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Network, FileText, Target, BarChart3, Fingerprint } from 'lucide-react';
 
-const DEFAULT_NODES = [
-  { id: '1', label: 'Primary Topic', type: 'core', x: 220, y: 180 },
-  { id: '2', label: 'Key Finding', type: 'concept', x: 100, y: 100 },
-  { id: '3', label: 'Conclusion', type: 'concept', x: 340, y: 100 },
-  { id: '4', label: 'Statistics', type: 'metric', x: 120, y: 260 },
-  { id: '5', label: 'Timeline Event', type: 'entity', x: 320, y: 260 },
-];
-
-const DEFAULT_LINKS = [
-  { source: '1', target: '2' },
-  { source: '1', target: '3' },
-  { source: '1', target: '4' },
-  { source: '1', target: '5' },
-  { source: '2', target: '4' },
-  { source: '3', target: '5' },
-];
+const NODE_TYPES = {
+  core: { color: 'var(--accent)', icon: FileText, size: 48 },
+  metric: { color: '#10b981', icon: BarChart3, size: 36 },
+  concept: { color: '#f59e0b', icon: Target, size: 36 },
+  entity: { color: '#8b5cf6', icon: Fingerprint, size: 36 },
+};
 
 export default function InteractiveGraph({ filename, chunksCount }) {
   const containerRef = useRef(null);
   const [nodes, setNodes] = useState([]);
   const [links, setLinks] = useState([]);
   const [hoveredNode, setHoveredNode] = useState(null);
+  const [draggingNode, setDraggingNode] = useState(null);
 
   useEffect(() => {
-    // Generate nodes dynamically based on the uploaded document name
-    const docWord = filename ? filename.split('.')[0].slice(0, 16) : 'Document';
+    const docWord = filename ? filename.split('.')[0].slice(0, 15) : 'Document';
+    const cx = 144; // Center X for ~288px panel
+    const cy = 160; // Center Y
+
+    // Orbital layout
     const dynamicNodes = [
-      { id: 'doc', label: docWord, type: 'core', x: 250, y: 200 },
-      { id: 'chunks', label: `${chunksCount || 12} Passages`, type: 'metric', x: 120, y: 110 },
-      { id: 'overview', label: 'Summary Overview', type: 'concept', x: 380, y: 120 },
-      { id: 'key_points', label: 'Key Objectives', type: 'concept', x: 130, y: 290 },
-      { id: 'findings', label: 'Extracted Facts', type: 'entity', x: 360, y: 280 },
-      { id: 'metadata', label: 'Structural Layout', type: 'entity', x: 250, y: 70 },
+      { id: 'doc', label: docWord, type: 'core', x: cx, y: cy },
+      { id: 'chunks', label: `${chunksCount || 12} Chunks`, type: 'metric', x: cx - 75, y: cy - 75 },
+      { id: 'overview', label: 'Summary', type: 'concept', x: cx + 75, y: cy - 75 },
+      { id: 'key_points', label: 'Objectives', type: 'concept', x: cx - 75, y: cy + 75 },
+      { id: 'findings', label: 'Entities', type: 'entity', x: cx + 75, y: cy + 75 },
     ];
 
     const dynamicLinks = [
@@ -42,7 +35,6 @@ export default function InteractiveGraph({ filename, chunksCount }) {
       { source: 'doc', target: 'overview' },
       { source: 'doc', target: 'key_points' },
       { source: 'doc', target: 'findings' },
-      { source: 'doc', target: 'metadata' },
       { source: 'chunks', target: 'key_points' },
       { source: 'overview', target: 'findings' },
     ];
@@ -51,8 +43,7 @@ export default function InteractiveGraph({ filename, chunksCount }) {
     setLinks(dynamicLinks);
   }, [filename, chunksCount]);
 
-  const handleDrag = (id, event, info) => {
-    // Update node positions dynamically so the link lines follow along
+  const handlePan = (id, info) => {
     setNodes((prev) =>
       prev.map((node) => {
         if (node.id === id) {
@@ -67,16 +58,14 @@ export default function InteractiveGraph({ filename, chunksCount }) {
     );
   };
 
-  const getLinkCoords = (link) => {
+  const getLinkPath = (link) => {
     const sourceNode = nodes.find((n) => n.id === link.source);
     const targetNode = nodes.find((n) => n.id === link.target);
-    if (!sourceNode || !targetNode) return { x1: 0, y1: 0, x2: 0, y2: 0 };
-    return {
-      x1: sourceNode.x,
-      y1: sourceNode.y,
-      x2: targetNode.x,
-      y2: targetNode.y,
-    };
+    if (!sourceNode || !targetNode) return '';
+    const dx = targetNode.x - sourceNode.x;
+    const dy = targetNode.y - sourceNode.y;
+    // Elegant organic bezier curve
+    return `M ${sourceNode.x} ${sourceNode.y} C ${sourceNode.x + dx / 2} ${sourceNode.y}, ${sourceNode.x + dx / 2} ${targetNode.y}, ${targetNode.x} ${targetNode.y}`;
   };
 
   return (
@@ -86,24 +75,29 @@ export default function InteractiveGraph({ filename, chunksCount }) {
         position: 'relative',
         width: '100%',
         height: '100%',
-        minHeight: 400,
-        background: 'var(--bg-2)',
+        minHeight: 320,
+        background: 'linear-gradient(145deg, var(--bg-2) 0%, var(--bg) 100%)',
         borderRadius: 'var(--r-xl)',
         overflow: 'hidden',
         border: '1px solid var(--border)',
+        boxShadow: 'inset 0 2px 10px rgba(0,0,0,0.02)',
       }}
     >
-      {/* Background Grid Accent */}
+      {/* Dynamic Grid Background */}
       <div
         style={{
           position: 'absolute',
           inset: 0,
-          backgroundImage: 'radial-gradient(var(--border) 1px, transparent 1px)',
+          backgroundImage: 'radial-gradient(var(--border-strong) 1px, transparent 1px)',
           backgroundSize: '24px 24px',
-          opacity: 0.5,
+          opacity: 0.4,
           pointerEvents: 'none',
         }}
       />
+      
+      {/* Subtle Glows */}
+      <div style={{ position: 'absolute', top: -50, left: -50, width: 150, height: 150, background: 'var(--accent)', opacity: 0.1, filter: 'blur(40px)', borderRadius: '50%', pointerEvents: 'none' }} />
+      <div style={{ position: 'absolute', bottom: -50, right: -50, width: 150, height: 150, background: '#10b981', opacity: 0.08, filter: 'blur(40px)', borderRadius: '50%', pointerEvents: 'none' }} />
 
       {/* Connection Links (SVG) */}
       <svg
@@ -116,100 +110,133 @@ export default function InteractiveGraph({ filename, chunksCount }) {
           zIndex: 5,
         }}
       >
+        <defs>
+          <linearGradient id="link-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.8" />
+            <stop offset="100%" stopColor="var(--text-muted)" stopOpacity="0.2" />
+          </linearGradient>
+        </defs>
         {links.map((link, idx) => {
-          const coords = getLinkCoords(link);
           const isHighlighted = hoveredNode === link.source || hoveredNode === link.target;
           return (
-            <motion.line
+            <motion.path
               key={idx}
-              x1={coords.x1}
-              y1={coords.y1}
-              x2={coords.x2}
-              y2={coords.y2}
-              stroke={isHighlighted ? 'var(--accent)' : 'var(--border-strong)'}
-              strokeWidth={isHighlighted ? 2 : 1}
-              strokeDasharray={isHighlighted ? '0' : '4 4'}
-              opacity={isHighlighted ? 0.8 : 0.4}
-              transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+              d={getLinkPath(link)}
+              fill="none"
+              stroke={isHighlighted ? 'url(#link-grad)' : 'var(--border-strong)'}
+              strokeWidth={isHighlighted ? 2.5 : 1.5}
+              strokeLinecap="round"
+              opacity={isHighlighted ? 1 : 0.4}
+              initial={{ pathLength: 0, opacity: 0 }}
+              animate={{ pathLength: 1, opacity: isHighlighted ? 1 : 0.4 }}
+              transition={{ duration: 1.5, ease: 'easeOut', delay: idx * 0.1 }}
             />
           );
         })}
       </svg>
 
       {/* Nodes */}
-      {nodes.map((node) => {
-        const isHovered = hoveredNode === node.id;
-        const color =
-          node.type === 'core'
-            ? 'var(--accent)'
-            : node.type === 'metric'
-            ? '#10b981'
-            : node.type === 'concept'
-            ? '#f59e0b'
-            : '#8b5cf6';
-
-        return (
-          <motion.div
-            key={node.id}
-            drag
-            dragConstraints={containerRef}
-            dragElastic={0.1}
-            dragMomentum={false}
-            onDrag={(e, info) => handleDrag(node.id, e, info)}
-            onHoverStart={() => setHoveredNode(node.id)}
-            onHoverEnd={() => setHoveredNode(null)}
-            style={{
-              position: 'absolute',
-              left: node.x,
-              top: node.y,
-              transform: 'translate(-50%, -50%)',
-              zIndex: isHovered ? 20 : 10,
-              cursor: 'grab',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-            }}
-            whileHover={{ scale: 1.08 }}
-            whileTap={{ scale: 0.96, cursor: 'grabbing' }}
-          >
-            {/* Holographic Glowing node circle */}
-            <div
-              style={{
-                width: node.type === 'core' ? 28 : 20,
-                height: node.type === 'core' ? 28 : 20,
-                borderRadius: '50%',
-                background: color,
-                border: '3px solid var(--surface)',
-                boxShadow: isHovered
-                  ? `0 0 16px ${color}, var(--s-3)`
-                  : `0 0 8px ${color}80, var(--s-1)`,
-                transition: 'box-shadow 0.2s ease',
+      <AnimatePresence>
+        {nodes.map((node, idx) => {
+          const isHovered = hoveredNode === node.id || draggingNode === node.id;
+          const nodeConf = NODE_TYPES[node.type] || NODE_TYPES.concept;
+          const Icon = nodeConf.icon;
+          
+          return (
+            <motion.div
+              key={node.id}
+              initial={{ scale: 0, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ 
+                scale: { type: 'spring', delay: idx * 0.1 },
+                opacity: { delay: idx * 0.1 }
               }}
-            />
-
-            {/* Label box */}
-            <div
+              onPan={(e, info) => handlePan(node.id, info)}
+              onPanStart={() => setDraggingNode(node.id)}
+              onPanEnd={() => setDraggingNode(null)}
+              onHoverStart={() => setHoveredNode(node.id)}
+              onHoverEnd={() => setHoveredNode(null)}
               style={{
-                marginTop: 6,
-                padding: '3px 8px',
-                borderRadius: 'var(--r-sm)',
-                background: 'var(--surface-raised)',
-                border: isHovered ? '1px solid var(--accent)' : '1px solid var(--border)',
-                boxShadow: 'var(--s-1)',
-                fontSize: 'var(--text-2xs)',
-                fontWeight: 600,
-                color: isHovered ? 'var(--text-primary)' : 'var(--text-secondary)',
-                whiteSpace: 'nowrap',
-                pointerEvents: 'none',
-                userSelect: 'none',
-                transition: 'all 0.2s ease',
+                position: 'absolute',
+                left: node.x,
+                top: node.y,
+                transform: 'translate(-50%, -50%)',
+                zIndex: isHovered ? 20 : 10,
+                cursor: draggingNode === node.id ? 'grabbing' : 'grab',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                touchAction: 'none'
               }}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
             >
-              {node.label}
-            </div>
-          </motion.div>
-        );
-      })}
+              {/* Node Icon Container */}
+              <div
+                style={{
+                  width: nodeConf.size,
+                  height: nodeConf.size,
+                  borderRadius: '50%',
+                  background: node.type === 'core' ? `linear-gradient(135deg, ${nodeConf.color}, #a78bfa)` : 'var(--surface)',
+                  border: node.type === 'core' ? 'none' : `1.5px solid ${nodeConf.color}`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: isHovered
+                    ? `0 8px 24px ${nodeConf.color}60, inset 0 2px 4px rgba(255,255,255,0.3)`
+                    : `0 4px 12px ${nodeConf.color}30, inset 0 2px 4px rgba(255,255,255,0.1)`,
+                  color: node.type === 'core' ? '#fff' : nodeConf.color,
+                  position: 'relative',
+                  backdropFilter: 'blur(8px)',
+                  transition: 'all 0.3s ease',
+                }}
+              >
+                <Icon size={node.type === 'core' ? 22 : 16} strokeWidth={2.5} />
+                
+                {/* Ping animation for core node */}
+                {node.type === 'core' && (
+                  <motion.div
+                    animate={{ scale: [1, 1.8], opacity: [0.6, 0] }}
+                    transition={{ repeat: Infinity, duration: 2, ease: "easeOut" }}
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      borderRadius: '50%',
+                      background: nodeConf.color,
+                      zIndex: -1,
+                    }}
+                  />
+                )}
+              </div>
+
+              {/* Label */}
+              <div
+                style={{
+                  position: 'absolute',
+                  top: nodeConf.size / 2 + 8,
+                  padding: '4px 10px',
+                  borderRadius: 'var(--r-full)',
+                  background: isHovered ? 'var(--surface)' : 'var(--surface-2)',
+                  border: `1px solid ${isHovered ? nodeConf.color : 'var(--border)'}`,
+                  boxShadow: isHovered ? 'var(--s-2)' : 'var(--s-1)',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  color: isHovered ? 'var(--text-primary)' : 'var(--text-secondary)',
+                  whiteSpace: 'nowrap',
+                  pointerEvents: 'none',
+                  userSelect: 'none',
+                  transition: 'all 0.2s ease',
+                  backdropFilter: 'blur(8px)',
+                  letterSpacing: '0.02em',
+                }}
+              >
+                {node.label}
+              </div>
+            </motion.div>
+          );
+        })}
+      </AnimatePresence>
 
       {/* Floating Mode Info */}
       <div
@@ -220,17 +247,22 @@ export default function InteractiveGraph({ filename, chunksCount }) {
           display: 'flex',
           alignItems: 'center',
           gap: 6,
-          background: 'var(--surface-raised)',
+          background: 'var(--surface)',
           border: '1px solid var(--border)',
           borderRadius: 'var(--r-full)',
-          padding: '4px 10px',
-          fontSize: 'var(--text-2xs)',
+          padding: '6px 12px',
+          fontSize: '10px',
+          fontWeight: 600,
           color: 'var(--text-muted)',
           zIndex: 30,
+          boxShadow: 'var(--s-1)',
+          backdropFilter: 'blur(12px)',
+          textTransform: 'uppercase',
+          letterSpacing: '0.04em',
         }}
       >
-        <Network size={10} />
-        <span>Drag nodes to map connections</span>
+        <Network size={12} />
+        <span>Interactive Map</span>
       </div>
     </div>
   );

@@ -138,6 +138,8 @@ export default function App() {
     loadData();
   }, [setServerData]);
 
+  const handleNewChatRef = useRef();
+
   // ── Global keyboard shortcuts ──────────────────────────────────────────────
   useEffect(() => {
     const handleKey = (e) => {
@@ -153,7 +155,7 @@ export default function App() {
       }
       // New chat: N (outside inputs)
       if (e.key === 'n' && !e.ctrlKey && !e.metaKey && !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) {
-        handleNewChat();
+        if (handleNewChatRef.current) handleNewChatRef.current();
       }
     };
     window.addEventListener('keydown', handleKey);
@@ -343,8 +345,14 @@ export default function App() {
 
   // ── New Chat ──────────────────────────────────────────────────────────────
   const handleNewChat = useCallback(() => {
+    if (activeConversation && activeConversation.messages.length === 0) return;
     createNewChat(activeFilename);
-  }, [createNewChat, activeFilename]);
+    setInputValue('');
+  }, [createNewChat, activeFilename, activeConversation]);
+
+  useEffect(() => {
+    handleNewChatRef.current = handleNewChat;
+  }, [handleNewChat]);
 
   // ── Clear Chat ────────────────────────────────────────────────────────────
   const handleClearChat = useCallback(() => {
@@ -407,10 +415,7 @@ export default function App() {
       />
 
       {/* ── Main region ── */}
-      <div
-        className="main-region"
-        style={{ marginLeft: !isMobile && sidebarOpen ? 'var(--sidebar-w)' : 0 }}
-      >
+      <div className="main-region">
         {/* Context bar / Header */}
         <Header
           onToggleSidebar={() => setSidebarOpen(v => !v)}
