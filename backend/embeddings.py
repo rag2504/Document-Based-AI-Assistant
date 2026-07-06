@@ -1,5 +1,12 @@
-from sentence_transformers import SentenceTransformer
+import os
+import logging
 from typing import List
+from google import genai
+
+logger = logging.getLogger(__name__)
+
+EMBEDDING_MODEL = "text-embedding-004"
+
 
 class EmbeddingModel:
     _instance = None
@@ -7,26 +14,27 @@ class EmbeddingModel:
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             cls._instance = super(EmbeddingModel, cls).__new__(cls)
-            # Load the model lazily on first instantiation
-            cls._instance.model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
+            api_key = os.getenv("GEMINI_API_KEY", "").strip()
+            cls._instance.client = genai.Client(api_key=api_key)
         return cls._instance
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        """
-        Generate embeddings for a list of document chunks.
-        """
-        embeddings = self.model.encode(texts, show_progress_bar=False)
-        return embeddings.tolist()
+        result = self.client.models.embed_content(
+            model=EMBEDDING_MODEL,
+            contents=texts,
+        )
+        return [e.values for e in result.embeddings]
 
     def embed_query(self, text: str) -> List[float]:
-        """
-        Generate embedding for a single user query.
-        """
-        embedding = self.model.encode([text], show_progress_bar=False)
-        return embedding[0].tolist()
+        result = self.client.models.embed_content(
+            model=EMBEDDING_MODEL,
+            contents=[text],
+        )
+        return result.embeddings[0].values
 
-# Global instance for ease of use
+
 _embedding_model = None
+
 
 def get_embedding_model() -> EmbeddingModel:
     global _embedding_model
