@@ -1,7 +1,6 @@
 import React from 'react';
-import {
-  Menu, FileText, Plus, Trash2, Download, Moon, Sun, X
-} from 'lucide-react';
+import { motion } from 'framer-motion';
+import { Menu, FileText, Plus, Trash2, Download, Moon, Sun, AlignLeft } from 'lucide-react';
 
 export default function Header({
   onToggleSidebar,
@@ -12,123 +11,94 @@ export default function Header({
   hasMessages,
   theme,
   onToggleTheme,
+  sidebarOpen,
 }) {
   return (
-    <header className="header">
-      {/* Hamburger */}
+    <header className="context-bar" role="banner">
+      {/* ── Sidebar toggle ── */}
       <button
+        className="icon-btn"
         onClick={onToggleSidebar}
-        className="btn btn-ghost"
-        style={{ padding: '7px', borderRadius: '9px', flexShrink: 0 }}
-        aria-label="Toggle sidebar"
+        aria-label={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+        title={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+        style={{ color: 'var(--text-secondary)' }}
       >
         <Menu size={18} />
       </button>
 
-      {/* Logo / brand (mobile) */}
-      <div style={{
-        fontSize: '15px', fontWeight: 700,
-        background: 'linear-gradient(135deg, #2563EB, #8B5CF6)',
-        WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-        display: 'none',
-      }} className="mobile-brand">
-        DocAI
-      </div>
-
-      {/* Active document badge */}
+      {/* ── Active document pill ── */}
       <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
         {activeDocument ? (
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: '8px',
-            padding: '6px 14px', borderRadius: '99px',
-            background: 'var(--surface-2)',
-            border: '1px solid var(--border)',
-            maxWidth: '400px',
-          }}>
+          <motion.div
+            className="context-bar-doc"
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+          >
             <div style={{
-              width: '7px', height: '7px', borderRadius: '50%',
-              background: '#10B981', flexShrink: 0,
-              boxShadow: '0 0 0 2px rgba(16,185,129,0.2)',
+              width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+              background: 'var(--success)', boxShadow: '0 0 0 2px var(--success-subtle)',
             }} />
-            <FileText size={14} style={{ color: 'var(--primary)', flexShrink: 0 }} />
-            <span style={{
-              fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)',
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              maxWidth: '280px',
-            }}>
-              {activeDocument}
-            </span>
-          </div>
+            <FileText size={13} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+            <span className="context-bar-doc-name">{activeDocument}</span>
+          </motion.div>
         ) : (
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: '6px',
-            padding: '5px 12px', borderRadius: '99px',
-            background: 'var(--surface-2)',
-            border: '1px solid var(--border)',
-          }}>
-            <div style={{
-              width: '7px', height: '7px', borderRadius: '50%',
-              background: 'var(--text-muted)',
-            }} />
-            <span style={{ fontSize: '12.5px', color: 'var(--text-muted)', fontWeight: 500 }}>
-              No document loaded
-            </span>
+          <div className="context-bar-doc" style={{ opacity: 0.6 }}>
+            <div style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: 'var(--border-strong)' }} />
+            <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }}>No document loaded</span>
           </div>
         )}
       </div>
 
-      {/* Right actions */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-        {/* Theme toggle */}
+      {/* ── Right actions ── */}
+      <div className="context-bar-actions">
         <button
+          className="icon-btn"
           onClick={onToggleTheme}
-          className="btn btn-ghost"
-          style={{ padding: '7px', borderRadius: '9px' }}
-          title={theme === 'dark' ? 'Switch to Light mode' : 'Switch to Dark mode'}
+          title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
+          aria-label="Toggle theme"
+          style={{ color: 'var(--text-muted)' }}
         >
           {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
         </button>
 
-        {/* Download chat */}
         {hasMessages && (
           <button
+            className="icon-btn"
             onClick={onDownloadChat}
-            className="btn btn-ghost"
-            style={{ padding: '7px', borderRadius: '9px' }}
-            title="Download chat as Markdown"
+            title="Export chat as Markdown"
+            aria-label="Download chat"
+            style={{ color: 'var(--text-muted)' }}
           >
             <Download size={16} />
           </button>
         )}
 
-        {/* Clear chat */}
         {hasMessages && (
           <button
+            className="icon-btn"
             onClick={onClearChat}
-            className="btn btn-ghost"
-            style={{ padding: '7px', borderRadius: '9px', color: '#EF4444' }}
             title="Clear chat"
+            aria-label="Clear chat"
+            style={{ color: 'var(--text-muted)' }}
           >
             <Trash2 size={16} />
           </button>
         )}
 
-        {/* New chat */}
         <button
-          onClick={onNewChat}
           className="btn btn-primary"
-          style={{ padding: '7px 14px', borderRadius: '9px', fontSize: '13px' }}
+          onClick={onNewChat}
+          aria-label="New chat"
+          style={{ fontSize: 'var(--text-xs)', height: 32, padding: '0 12px' }}
         >
-          <Plus size={15} />
-          <span className="hide-sm">New Chat</span>
+          <Plus size={14} />
+          <span className="hide-sm">New chat</span>
         </button>
       </div>
 
       <style>{`
-        @media (max-width: 640px) {
-          .hide-sm { display: none; }
-          .mobile-brand { display: block !important; }
-        }
+        @media (max-width: 540px) { .hide-sm { display: none; } }
       `}</style>
     </header>
   );

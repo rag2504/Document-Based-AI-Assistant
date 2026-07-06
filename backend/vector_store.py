@@ -1,9 +1,6 @@
 import os
-import chromadb
 from typing import List, Dict, Any
-
-CHROMA_DB_DIR = os.path.join(os.path.dirname(__file__), "chroma_db")
-COLLECTION_NAME = "documents"
+from supabase import create_client, Client  # type: ignore
 
 class VectorStore:
     _instance = None
@@ -11,91 +8,107 @@ class VectorStore:
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             cls._instance = super(VectorStore, cls).__new__(cls)
-            os.makedirs(CHROMA_DB_DIR, exist_ok=True)
-            # Initialize persistent client
-            cls._instance.client = chromadb.PersistentClient(path=CHROMA_DB_DIR)
-            # Get or create collection
-            cls._instance.collection = cls._instance.client.get_or_create_collection(
-                name=COLLECTION_NAME,
-                metadata={"hnsw:space": "cosine"} # Use cosine similarity
-            )
+            # Initialize Supabase client
+            supabase_url = os.environ.get("SUPABASE_URL")
+            supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+            
+            if not supabase_url or not supabase_key:
+                raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables must be set.")
+                
+            cls._instance.client: Client = create_client(supabase_url, supabase_key)
         return cls._instance
 
-    def is_file_indexed(self, filename: str) -> bool:
+    def is_file_indexed(self, filename: str, session_id: str) -> bool:
         """
-        Checks if the file is already indexed in ChromaDB.
+        Checks if the file is already indexed in Supabase for the given session.
         """
-        results = self.collection.get(
-            where={"filename": filename},
-            limit=1
-        )
-        return len(results.get("ids", [])) > 0
+        response = self.client.table("documents").select("id").eq("filename", filename).eq("session_id", session_id).execute()
+        return len(response.data) > 0
 
-    def add_chunks(self, chunks: List[Dict[str, Any]], embeddings: List[List[float]]):
+    def add_chunks(self, chunks: List[Dict[str, Any]], embeddings: List[List[float]], session_id: str):
         """
         Adds document chunks and their pre-computed embeddings to the vector database.
         """
         if not chunks:
             return
             
-        ids = [chunk["chunk_id"] for chunk in chunks]
-        documents = [chunk["chunk_text"] for chunk in chunks]
-        metadatas = [
-            {
-                "page_number": chunk["page_number"],
-                "filename": chunk["filename"]
-            }
-            for chunk in chunks
-        ]
+        filename = chunks[0]["filename"]
         
-        # Add to ChromaDB
-        self.collection.add(
-            ids=ids,
-            embeddings=embeddings,
-            metadatas=metadatas,
-            documents=documents
-        )
+        # 1. First, insert the document to get the document_id
+        doc_response = self.client.table("documents").insert({
+            "session_id": session_id,
+            "filename": filename,
+            "pages": max([c["page_number"] for c in chunks]),
+            "chunk_count": len(chunks)
+        }).execute()
+        
+        if not doc_response.data:
+            raise Exception("Failed to insert document metadata")
+            
+        document_id = doc_response.data[0]["id"]
+        
+        # 2. Insert chunks with embeddings
+        records = []
+        for chunk, embedding in zip(chunks, embeddings):
+            records.append({
+                "document_id": document_id,
+                "session_id": session_id,
+                "filename": filename,
+                "chunk_id": chunk["chunk_id"],
+                "page_number": chunk["page_number"],
+                "content": chunk["chunk_text"],
+                "embedding": embedding
+            })
+            
+        # Supabase API limits insertions to somewhat reasonable batch sizes.
+        # We'll insert in batches of 100 to be safe.
+        batch_size = 100
+        for i in range(0, len(records), batch_size):
+            batch = records[i:i + batch_size]
+            self.client.table("document_chunks").insert(batch).execute()
 
-    def query_similarity(self, query_embedding: List[float], filename: str, top_k: int = 5) -> List[Dict[str, Any]]:
+    def query_similarity(self, query_embedding: List[float], filename: str, session_id: str, top_k: int = 5) -> List[Dict[str, Any]]:
         """
-        Queries the vector store for the top_k most similar chunks, filtered by filename.
+        Queries the vector store for the top_k most similar chunks, filtered by filename and session_id.
         """
-        results = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=top_k,
-            where={"filename": filename}
-        )
+        response = self.client.rpc(
+            "match_document_chunks",
+            {
+                "query_embedding": query_embedding,
+                "match_count": top_k,
+                "p_session_id": session_id,
+                "p_filename": filename
+            }
+        ).execute()
         
         chunks = []
-        if not results or not results["ids"] or len(results["ids"][0]) == 0:
+        if not response.data:
             return chunks
             
-        ids = results["ids"][0]
-        documents = results["documents"][0]
-        metadatas = results["metadatas"][0]
-        
-        for i in range(len(ids)):
+        for row in response.data:
             chunks.append({
-                "chunk_id": ids[i],
-                "text": documents[i],
-                "page_number": metadatas[i]["page_number"],
-                "filename": metadatas[i]["filename"]
+                "chunk_id": row["chunk_id"],
+                "text": row["content"],
+                "page_number": row["page_number"],
+                "filename": row["filename"]
             })
             
         return chunks
 
-    def count_chunks_for_file(self, filename: str) -> int:
+    def count_chunks_for_file(self, filename: str, session_id: str) -> int:
         """
-        Returns the number of indexed chunks for a given filename.
+        Returns the number of indexed chunks for a given filename and session_id.
         """
-        results = self.collection.get(where={"filename": filename})
-        return len(results.get("ids", []))
+        response = self.client.table("documents").select("chunk_count").eq("filename", filename).eq("session_id", session_id).execute()
+        if response.data:
+            return response.data[0]["chunk_count"]
+        return 0
 
-    def delete_file(self, filename: str):
+    def delete_file(self, filename: str, session_id: str):
         """
-        Deletes all chunks associated with a filename.
+        Deletes all chunks associated with a filename and session_id.
         """
-        self.collection.delete(where={"filename": filename})
+        self.client.table("documents").delete().eq("filename", filename).eq("session_id", session_id).execute()
 
 # Global singleton client
 _vector_store = None

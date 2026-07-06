@@ -50,6 +50,9 @@ frontend/.vite/
 # ── ChromaDB (vector database — persisted locally, regenerate on deploy) ──────
 backend/chroma_db/
 
+# ── Model cache (HuggingFace / sentence-transformers — downloaded at runtime) ─
+backend/.cache/
+
 # ── Uploaded documents ────────────────────────────────────────────────────────
 # Keep the folder but ignore any actual files uploaded at runtime
 backend/uploads/*

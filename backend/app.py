@@ -1,14 +1,14 @@
 import os
 import json
 import logging
-import shutil
 from contextlib import asynccontextmanager
+from datetime import datetime
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, status
+from fastapi import FastAPI, UploadFile, File, HTTPException, status, Header
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from dotenv import load_dotenv
 
 # ── Load env before any local imports ─────────────────────────────────────────
@@ -23,8 +23,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ── Local imports ─────────────────────────────────────────────────────────────
-from utils import allowed_file, ensure_directory
-from document_loader import load_and_chunk_file
+from utils import validate_file_content, allowed_file, InvalidAPIKeyError
+from document_loader import load_and_chunk_bytes
 from embeddings import get_embedding_model
 from vector_store import get_vector_store
 from rag import (
@@ -42,19 +42,28 @@ from rag import (
 async def lifespan(app: FastAPI):
     """
     Runs once when the server starts.
-    Validates the Gemini model and warms up the embedding singleton.
+    Validates the Groq model and warms up the embedding singleton.
     """
     logger.info("=" * 60)
     logger.info("Starting Document AI Assistant backend …")
 
-    # 1. Validate & select the Gemini model
-    active = initialize_model()
-    logger.info(f"Gemini model confirmed: '{active}'")
+    # 1. Validate & select the Groq model
+    try:
+        active = initialize_model()
+        logger.info(f"Groq model confirmed: '{active}'")
+    except InvalidAPIKeyError as e:
+        logger.error(f"❌ API Key Configuration Error: {e}")
+        logger.warning("FastAPI running in degraded state (API key invalid). Check configuration.")
+    except Exception as e:
+        logger.error(f"❌ Startup check failed: {e}")
 
     # 2. Warm-up the embedding model (loads weights into memory once)
-    logger.info("Loading sentence-transformer embedding model …")
-    get_embedding_model()
-    logger.info("Embedding model ready.")
+    try:
+        logger.info("Loading sentence-transformer embedding model …")
+        get_embedding_model()
+        logger.info("Embedding model ready.")
+    except Exception as e:
+        logger.error(f"❌ Failed to load embedding model: {e}")
 
     logger.info("=" * 60)
     yield  # ← server is running
@@ -64,20 +73,94 @@ async def lifespan(app: FastAPI):
 # ── App ────────────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="Document-Based AI Assistant API",
-    description="RAG pipeline: PDF/TXT → ChromaDB → Gemini → grounded answers",
-    version="2.0.0",
+    description="RAG pipeline: PDF/TXT → Supabase pgvector → Groq → grounded answers",
+    version="2.1.0",
     lifespan=lifespan,
 )
 
+# ── Global Exception Handlers ─────────────────────────────────────────────────
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request, exc: HTTPException):
+    """
+    Returns standardized JSON error responses with CORS headers.
+    """
+    origin = request.headers.get("origin")
+    headers = {}
+    if origin and origin in ALLOWED_ORIGINS:
+        headers["Access-Control-Allow-Origin"] = origin
+        headers["Access-Control-Allow-Credentials"] = "true"
+
+    error_msg = exc.detail
+    details_msg = ""
+    if isinstance(exc.detail, dict):
+        error_msg = exc.detail.get("error", "HTTP Error")
+        details_msg = exc.detail.get("details", "")
+
+    return JSONResponse(
+        status_code=exc.status_code,
+        headers=headers,
+        content={
+            "success": False,
+            "error": error_msg,
+            "details": details_msg,
+            "code": f"HTTP_{exc.status_code}"
+        }
+    )
+
+@app.exception_handler(Exception)
+async def generic_exception_handler(request, exc: Exception):
+    """
+    Catches unhandled exceptions and returns CORS-compliant JSON responses.
+    Gracefully handles invalid or expired Groq API keys.
+    """
+    origin = request.headers.get("origin")
+    headers = {}
+    if origin and origin in ALLOWED_ORIGINS:
+        headers["Access-Control-Allow-Origin"] = origin
+        headers["Access-Control-Allow-Credentials"] = "true"
+
+    logger.error(f"Unhandled exception occurred: {exc}", exc_info=True)
+    
+    if isinstance(exc, InvalidAPIKeyError):
+        return JSONResponse(
+            status_code=400,
+            headers=headers,
+            content={
+                "success": False,
+                "error": "Invalid Groq API Key Configuration",
+                "details": str(exc),
+                "code": "GROQ_INVALID_KEY_FORMAT"
+            }
+        )
+
+    # Check for invalid/expired Groq API Key
+    exc_msg = str(exc).lower()
+    if "api key not valid" in exc_msg or "api_key_invalid" in exc_msg or "unauthorized" in exc_msg or "forbidden" in exc_msg or "invalid_api_key" in exc_msg:
+        return JSONResponse(
+            status_code=400,
+            headers=headers,
+            content={
+                "success": False,
+                "error": "Invalid or Expired API Key",
+                "details": "Your GROQ_API_KEY in the backend/.env file is invalid or has expired. Please check your key or create a new one in the Groq Console.",
+                "code": "GROQ_INVALID_KEY"
+            }
+        )
+
+    return JSONResponse(
+        status_code=500,
+        headers=headers,
+        content={
+            "success": False,
+            "error": "Internal Server Error",
+            "details": "An unexpected error occurred on the server. Please check the backend logs.",
+            "code": "INTERNAL_SERVER_ERROR"
+        }
+    )
+
 # ── CORS ───────────────────────────────────────────────────────────────────────
-# Set ALLOWED_ORIGINS in Render env vars to your Vercel URL, e.g.:
-#   https://docai.vercel.app,https://docai-git-main-yourname.vercel.app
-_origins_env = os.getenv("ALLOWED_ORIGINS", "*")
-ALLOWED_ORIGINS = (
-    [o.strip() for o in _origins_env.split(",") if o.strip()]
-    if _origins_env != "*"
-    else ["*"]
-)
+_origins_env = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
+ALLOWED_ORIGINS = [o.strip() for o in _origins_env.split(",") if o.strip()]
 
 app.add_middleware(
     CORSMiddleware,
@@ -87,18 +170,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
-ensure_directory(UPLOAD_DIR)
-
-# ── Session state (in-memory, single-user) ─────────────────────────────────────
-state: dict = {"active_filename": None}
-
 
 # ── Request models ─────────────────────────────────────────────────────────────
 class ChatRequest(BaseModel):
     question: str
     filename: Optional[str] = None
     stream: Optional[bool] = True
+    conversation_id: str
+    message_id: str
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -109,17 +188,13 @@ class ChatRequest(BaseModel):
 def read_root():
     return {
         "status": "running",
-        "active_file": state["active_filename"],
         "active_model": get_active_model(),
     }
 
-
-# ── Debug: list available models ──────────────────────────────────────────────
 @app.get("/models")
 def get_models():
     """
-    Lists all Gemini models available for the configured API key.
-    Useful for debugging quota or availability issues.
+    Lists all Groq models available for the configured API key.
     """
     try:
         models = list_available_models()
@@ -132,43 +207,151 @@ def get_models():
         logger.error(f"[/models] Failed to list models: {exc}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Unable to retrieve model list. Verify your GEMINI_API_KEY.",
+            detail="Unable to retrieve model list. Verify your GROQ_API_KEY.",
         )
 
+# ── Health & Readiness Probes ─────────────────────────────────────────────────
+@app.get("/health")
+def health_check():
+    """
+    Fast health check endpoint.
+    """
+    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
+
+@app.get("/readiness")
+def readiness_check():
+    """
+    Readiness check endpoint that verifies Supabase connection status.
+    """
+    try:
+        vs = get_vector_store()
+        # Query 1 row from documents to check database availability
+        vs.client.table("documents").select("id").limit(1).execute()
+        return {"status": "ready", "database": "connected"}
+    except Exception as e:
+        logger.error(f"Readiness check failed (database disconnected): {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error": "Service Unavailable",
+                "details": "Database connection is offline."
+            }
+        )
+
+# ── Session Data ──────────────────────────────────────────────────────────────
+@app.get("/session/data")
+def get_session_data(x_session_id: str = Header(None)):
+    """
+    Fetches all documents and conversations for a session.
+    Optimized to fetch all conversation messages in a single query (solves N+1 query problem).
+    """
+    if not x_session_id:
+        raise HTTPException(status_code=400, detail="Missing x-session-id header")
+        
+    vs = get_vector_store()
+    
+    # 1. Fetch documents
+    docs_res = vs.client.table("documents").select("*").eq("session_id", x_session_id).order("uploaded_at", desc=True).execute()
+    documents = docs_res.data
+    
+    # 2. Fetch conversations
+    convs_res = vs.client.table("conversations").select("*").eq("session_id", x_session_id).order("updated_at", desc=True).execute()
+    conversations = []
+    
+    if convs_res.data:
+        conv_ids = [c["id"] for c in convs_res.data]
+        
+        # 3. Batch fetch ALL messages for ALL user conversations in ONE query
+        msgs_res = vs.client.table("chat_messages").select("*").in_("conversation_id", conv_ids).order("created_at").execute()
+        
+        # Group messages by conversation ID in memory
+        from collections import defaultdict
+        msgs_by_conv = defaultdict(list)
+        for m in msgs_res.data:
+            msgs_by_conv[m["conversation_id"]].append({
+                "id": m["id"],
+                "role": m["role"],
+                "content": m["message"],
+                "sources": m["sources"] or [],
+                "timestamp": m["created_at"]
+            })
+            
+        for conv in convs_res.data:
+            document_name = None
+            if conv["document_id"]:
+                doc = next((d for d in documents if d["id"] == conv["document_id"]), None)
+                if doc:
+                    document_name = doc["filename"]
+                    
+            conversations.append({
+                "id": conv["id"],
+                "title": conv["title"],
+                "documentName": document_name,
+                "createdAt": conv["created_at"],
+                "updatedAt": conv["updated_at"],
+                "messages": msgs_by_conv[conv["id"]]
+            })
+        
+    return {
+        "success": True,
+        "documents": documents,
+        "conversations": conversations
+    }
 
 # ── Upload ─────────────────────────────────────────────────────────────────────
 @app.post("/upload")
-async def upload_document(file: UploadFile = File(...)):
+async def upload_document(file: UploadFile = File(...), x_session_id: str = Header(None)):
     """
-    Accepts PDF or TXT files.
-    If already indexed in ChromaDB, returns cached stats instantly.
-    Otherwise: extract → chunk → embed → store.
+    Accepts PDF or TXT files. 
+    Strictly validates MIME type, magic bytes, and enforces a 10 MB size limit in-memory.
+    No temporary files are created on disk.
     """
-    if not allowed_file(file.filename):
+    if not x_session_id:
+        raise HTTPException(status_code=400, detail="Missing x-session-id header")
+        
+    filename = os.path.basename(file.filename)
+    
+    # 1. In-memory validation (MIME & Magic Bytes)
+    header_bytes = await file.read(2048)
+    await file.seek(0)
+    
+    if not validate_file_content(filename, file.content_type, header_bytes):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Unsupported file format. Only PDF and TXT documents are allowed.",
+            detail="Invalid file content or format. Only PDF and TXT documents are allowed.",
         )
-
-    filename = os.path.basename(file.filename)
-    file_path = os.path.join(UPLOAD_DIR, filename)
-
-    # Save file to disk
-    try:
-        with open(file_path, "wb") as buf:
-            shutil.copyfileobj(file.file, buf)
-    except Exception as exc:
+        
+    # 2. Limit maximum file size to 10 MB in-memory
+    max_size = 10 * 1024 * 1024  # 10 MB
+    size = 0
+    file_bytes_list = []
+    
+    while chunk := await file.read(1024 * 1024):  # Read in 1MB buffers
+        size += len(chunk)
+        if size > max_size:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File is too large. Maximum allowed size is 10 MB.",
+            )
+        file_bytes_list.append(chunk)
+        
+    file_bytes = b"".join(file_bytes_list)
+    
+    # Edge case: small files might fit entirely in first header_bytes read
+    if not file_bytes and header_bytes:
+        file_bytes = header_bytes
+        
+    if not file_bytes:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to save file: {exc}",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The uploaded file is empty.",
         )
 
     vector_store = get_vector_store()
 
-    # Return early if already indexed (cache hit)
-    if vector_store.is_file_indexed(filename):
-        chunk_count = vector_store.count_chunks_for_file(filename)
-        state["active_filename"] = filename
+    # Return early if already indexed for this session
+    if vector_store.is_file_indexed(filename, x_session_id):
+        chunk_count = vector_store.count_chunks_for_file(filename, x_session_id)
         logger.info(f"[UPLOAD] Cache hit: '{filename}' ({chunk_count} chunks)")
         return {
             "success": True,
@@ -177,13 +360,12 @@ async def upload_document(file: UploadFile = File(...)):
             "message": "File loaded from cache (already indexed).",
         }
 
-    # Process new file
+    # Process file chunks and embeddings directly from memory
     try:
         logger.info(f"[UPLOAD] Indexing new file: '{filename}'")
-        chunks = load_and_chunk_file(file_path)
+        chunks = load_and_chunk_bytes(file_bytes, filename)
 
         if not chunks:
-            os.remove(file_path)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="The uploaded document contains no readable text.",
@@ -192,9 +374,8 @@ async def upload_document(file: UploadFile = File(...)):
         emb_model = get_embedding_model()
         texts = [c["chunk_text"] for c in chunks]
         embeddings = emb_model.embed_documents(texts)
-        vector_store.add_chunks(chunks, embeddings)
+        vector_store.add_chunks(chunks, embeddings, x_session_id)
 
-        state["active_filename"] = filename
         logger.info(f"[UPLOAD] Indexed '{filename}' → {len(chunks)} chunks")
 
         return {
@@ -207,8 +388,6 @@ async def upload_document(file: UploadFile = File(...)):
     except HTTPException:
         raise
     except Exception as exc:
-        if os.path.exists(file_path):
-            os.remove(file_path)
         logger.error(f"[UPLOAD] Indexing failed for '{filename}': {exc}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -218,14 +397,15 @@ async def upload_document(file: UploadFile = File(...)):
 
 # ── Chat ───────────────────────────────────────────────────────────────────────
 @app.post("/chat")
-def chat(request: ChatRequest):
+def chat(request: ChatRequest, x_session_id: str = Header(None)):
     """
-    RAG chat endpoint.
-    - Embeds the question, retrieves top-5 chunks from ChromaDB.
-    - Calls Gemini and streams or returns a grounded answer.
-    - Returns structured JSON errors on Gemini failures (never raw exceptions).
+    RAG chat endpoint using Supabase.
+    Escapes newlines during streaming to ensure markdown integrity.
     """
-    filename = request.filename or state["active_filename"]
+    if not x_session_id:
+        raise HTTPException(status_code=400, detail="Missing x-session-id header")
+        
+    filename = request.filename
     if not filename:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -233,11 +413,46 @@ def chat(request: ChatRequest):
         )
 
     vector_store = get_vector_store()
-    if not vector_store.is_file_indexed(filename):
+    if not vector_store.is_file_indexed(filename, x_session_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Document '{filename}' is not indexed. Please re-upload.",
         )
+
+    # Manage conversation in Supabase
+    conv_res = vector_store.client.table("conversations").select("*").eq("id", request.conversation_id).execute()
+    
+    # Get active document ID to sync
+    doc_res = vector_store.client.table("documents").select("id").eq("filename", filename).eq("session_id", x_session_id).execute()
+    doc_id = doc_res.data[0]["id"] if doc_res.data else None
+
+    if not conv_res.data:
+        # Auto generate title based on first prompt
+        title = request.question.strip()[:50]
+        if len(request.question.strip()) > 50:
+            title += "…"
+            
+        vector_store.client.table("conversations").insert({
+            "id": request.conversation_id,
+            "session_id": x_session_id,
+            "title": title,
+            "document_id": doc_id
+        }).execute()
+    else:
+        # Update updated_at timestamp to pull conversation to the top AND sync document_id
+        vector_store.client.table("conversations").update({
+            "updated_at": datetime.utcnow().isoformat(),
+            "document_id": doc_id
+        }).eq("id", request.conversation_id).execute()
+
+    # Save user message
+    vector_store.client.table("chat_messages").insert({
+        "id": request.message_id + "_user",
+        "session_id": x_session_id,
+        "conversation_id": request.conversation_id,
+        "role": "user",
+        "message": request.question
+    }).execute()
 
     # 1. Embed question
     emb_model = get_embedding_model()
@@ -245,11 +460,22 @@ def chat(request: ChatRequest):
 
     # 2. Similarity search (top 5)
     top_k = int(os.getenv("TOP_K", 5))
-    relevant_chunks = vector_store.query_similarity(query_emb, filename, top_k=top_k)
+    relevant_chunks = vector_store.query_similarity(query_emb, filename, x_session_id, top_k=top_k)
 
     # 3. No relevant chunks → deterministic fallback
     if not relevant_chunks:
         fallback = "I couldn't find that information in the uploaded document."
+        
+        # Save assistant message
+        vector_store.client.table("chat_messages").insert({
+            "id": request.message_id,
+            "session_id": x_session_id,
+            "conversation_id": request.conversation_id,
+            "role": "assistant",
+            "message": fallback,
+            "sources": []
+        }).execute()
+        
         if request.stream:
             def _empty_stream():
                 yield "event: sources\ndata: []\n\n"
@@ -267,26 +493,41 @@ def chat(request: ChatRequest):
     # 4a. Streaming (SSE)
     if request.stream:
         def sse_generator():
-            # Send citations first so the UI can render them before the text starts
             yield f"event: sources\ndata: {json.dumps(sources)}\n\n"
 
+            answer_text = ""
             try:
                 for token in generate_answer_stream(request.question, relevant_chunks):
-                    # Escape newlines so they don't break the SSE frame
-                    safe_token = token.replace("\n", " ")
+                    # Escape newlines as literal \n sequences so they do not break the SSE framing.
+                    # Frontend will reconstruct \n correctly for markdown parsing.
+                    safe_token = token.replace("\n", "\\n")
                     yield f"event: text\ndata: {safe_token}\n\n"
+                    answer_text += token
 
             except GeminiQuotaError:
                 msg = (
-                    "⚠️ Gemini API quota exceeded. Your free-tier limit has been reached. "
-                    "Please wait a minute and try again, or check your quota at "
-                    "https://ai.google.dev/gemini-api/docs/rate-limits"
+                    "⚠️ Groq API quota exceeded. Your free-tier limit has been reached. "
+                    "Please wait a minute and try again, or check your rate limits "
+                    "in the Groq console."
                 )
                 yield f"event: text\ndata: {msg}\n\n"
+                answer_text += msg
 
             except GeminiAPIError as exc:
-                msg = f"⚠️ Gemini API error. Check backend logs for details."
+                msg = f"⚠️ Groq API error. Check backend logs for details."
                 yield f"event: text\ndata: {msg}\n\n"
+                answer_text += msg
+                
+            # Save final streamed answer to the database
+            vs = get_vector_store()
+            vs.client.table("chat_messages").insert({
+                "id": request.message_id,
+                "session_id": x_session_id,
+                "conversation_id": request.conversation_id,
+                "role": "assistant",
+                "message": answer_text,
+                "sources": sources
+            }).execute()
 
             yield "event: end\ndata: [DONE]\n\n"
 
@@ -296,7 +537,6 @@ def chat(request: ChatRequest):
     result = generate_answer(request.question, relevant_chunks)
 
     if "error" in result:
-        # Return a structured JSON error response
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content={
@@ -307,12 +547,30 @@ def chat(request: ChatRequest):
             },
         )
 
+    # Save assistant message
+    vector_store.client.table("chat_messages").insert({
+        "id": request.message_id,
+        "session_id": x_session_id,
+        "conversation_id": request.conversation_id,
+        "role": "assistant",
+        "message": result["text"],
+        "sources": sources
+    }).execute()
+
     return {"answer": result["text"], "sources": sources}
 
 
-# ── Clear session ──────────────────────────────────────────────────────────────
-@app.post("/clear")
-def clear_active_document():
-    """Clears the current active document session."""
-    state["active_filename"] = None
-    return {"success": True, "message": "Active document reset."}
+# ── Reset / Clear session ───────────────────────────────────────────────────────
+@app.post("/reset")
+def reset_session(x_session_id: str = Header(None)):
+    """Deletes all database data associated with the current session."""
+    if not x_session_id:
+        raise HTTPException(status_code=400, detail="Missing x-session-id header")
+        
+    vs = get_vector_store()
+    
+    # Cascades will automatically clean up chunks and messages
+    vs.client.table("documents").delete().eq("session_id", x_session_id).execute()
+    vs.client.table("conversations").delete().eq("session_id", x_session_id).execute()
+    
+    return {"success": True, "message": "Session data reset."}

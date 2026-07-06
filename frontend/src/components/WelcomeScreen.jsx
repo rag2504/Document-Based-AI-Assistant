@@ -1,40 +1,85 @@
-import React, { useRef, useState } from 'react';
-import { UploadCloud, FileText, AlertCircle, Sparkles, Zap, Search, BookOpen } from 'lucide-react';
+import React, { useRef, useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { UploadCloud, AlertCircle, FileText, Sparkles, Terminal, Network, ShieldCheck } from 'lucide-react';
+
+/* ── Semantic concept keywords that fly out during scanning ── */
+const WORDS_POOL = [
+  'Retrieval', 'pgvector', 'Metadata', 'Semantics', 'Tokens',
+  'Context', 'Efficacy', 'Analytics', 'Inference', 'Chronology',
+  'Embeddings', 'Entities', 'Citations', 'Summary',
+];
+
+const PIPELINE_STAGES = [
+  { label: 'Reading bytes',            desc: 'Loading document stream in-memory' },
+  { label: 'Analysing structure',      desc: 'Parsing PDF elements and layout' },
+  { label: 'Extracting semantic nodes', desc: 'Building local vector boundaries' },
+  { label: 'Generating embeddings',    desc: 'Processing all-MiniLM-L6-v2 vectors' },
+  { label: 'Indexing knowledge graph', desc: 'Injecting chunks into pgvector' },
+];
 
 const SUGGESTED_PROMPTS = [
-  { icon: '🔍', text: 'Summarize this document.' },
-  { icon: '💼', text: 'What are the key skills mentioned?' },
-  { icon: '📋', text: 'What projects are described?' },
-  { icon: '🎯', text: 'What are the main conclusions?' },
+  { icon: '✦', text: 'Summarize this document' },
+  { icon: '🔑', text: 'What are the key findings?' },
+  { icon: '📋', text: 'List the main topics' },
+  { icon: '🎯', text: 'What are the conclusions?' },
+  { icon: '💡', text: 'What insights can I draw?' },
 ];
 
-const FEATURES = [
+const FEATURE_CARDS = [
   {
-    icon: <UploadCloud size={22} />,
-    title: 'Upload Documents',
-    desc: 'Drop your PDF or TXT files. Instant indexing with ChromaDB.',
-    color: '#2563EB',
+    color: 'var(--accent)',
+    Icon: Terminal,
+    title: 'Presentation Engine',
+    desc: 'LLM answers compile into timelines, comparisons, and metrics automatically.',
   },
   {
-    icon: <Zap size={22} />,
-    title: 'Ask Anything',
-    desc: 'Natural language questions. Answers grounded in your content.',
-    color: '#8B5CF6',
+    color: '#10b981',
+    Icon: Network,
+    title: 'Knowledge Graph',
+    desc: 'Interactive 2D concept maps link chunks and extracted facts dynamically.',
   },
   {
-    icon: <Search size={22} />,
-    title: 'Cited Sources',
-    desc: 'Every answer includes references to exact document passages.',
-    color: '#059669',
+    color: '#f59e0b',
+    Icon: ShieldCheck,
+    title: 'Offline Embeddings',
+    desc: 'all-MiniLM-L6-v2 runs locally — private, rate-limit-free vector search.',
   },
 ];
 
-export default function WelcomeScreen({ onFileSelect, onSuggestedPrompt, uploadStatus, uploadProgress, uploadError, onRetry }) {
+export default function WelcomeScreen({
+  onFileSelect,
+  onSuggestedPrompt,
+  uploadStatus,
+  uploadProgress,
+  uploadError,
+  onRetry,
+}) {
   const fileInputRef = useRef(null);
   const [isDragging, setIsDragging] = useState(false);
   const [fileError, setFileError] = useState(null);
+  const [flyingWords, setFlyingWords] = useState([]);
 
-  const isUploading = uploadStatus === 'uploading' || uploadStatus === 'indexing';
+  const isUploading = ['uploading', 'indexing', 'parsing', 'embedding', 'chunking'].includes(uploadStatus);
+
+  const pipelineStage = (() => {
+    if (uploadProgress < 20) return 0;
+    if (uploadProgress < 40) return 1;
+    if (uploadProgress < 65) return 2;
+    if (uploadProgress < 85) return 3;
+    return 4;
+  })();
+
+  /* Flying keyword animation during upload */
+  useEffect(() => {
+    if (!isUploading) return;
+    const interval = setInterval(() => {
+      const word = WORDS_POOL[Math.floor(Math.random() * WORDS_POOL.length)];
+      const id = Math.random().toString(36).slice(2, 7);
+      setFlyingWords(prev => [...prev, { id, word, left: `${20 + Math.random() * 60}%`, delay: Math.random() * 0.4 }]);
+      setTimeout(() => setFlyingWords(prev => prev.filter(w => w.id !== id)), 3000);
+    }, 380);
+    return () => clearInterval(interval);
+  }, [isUploading]);
 
   const validateAndSelect = (file) => {
     setFileError(null);
@@ -50,8 +95,7 @@ export default function WelcomeScreen({ onFileSelect, onSuggestedPrompt, uploadS
   const handleDrag = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    if (e.type === 'dragenter' || e.type === 'dragover') setIsDragging(true);
-    else setIsDragging(false);
+    setIsDragging(e.type === 'dragenter' || e.type === 'dragover');
   };
 
   const handleDrop = (e) => {
@@ -61,206 +105,249 @@ export default function WelcomeScreen({ onFileSelect, onSuggestedPrompt, uploadS
     if (e.dataTransfer.files?.[0]) validateAndSelect(e.dataTransfer.files[0]);
   };
 
-  const handleFileChange = (e) => {
-    if (e.target.files?.[0]) validateAndSelect(e.target.files[0]);
-  };
+  /* ── Shared max-width for all columns: 540px ── */
+  const colStyle = { width: '100%', maxWidth: 540 };
 
   return (
-    <div style={{
-      flex: 1, overflowY: 'auto', display: 'flex',
-      flexDirection: 'column', alignItems: 'center',
-      padding: '40px 20px 100px',
-      background: 'var(--bg)',
-    }}>
-      {/* ── Hero ── */}
-      <div className="animate-fade-slide-in" style={{ textAlign: 'center', marginBottom: '48px' }}>
-        {/* Orb */}
-        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '28px' }}>
-          <div className="hero-orb" style={{ position: 'relative' }}>
-            <BookOpen
-              size={40}
-              color="white"
-              style={{
-                position: 'absolute', top: '50%', left: '50%',
-                transform: 'translate(-50%, -50%)',
-                filter: 'drop-shadow(0 2px 6px rgba(0,0,0,0.2))',
-              }}
-            />
-          </div>
-        </div>
+    <div
+      className="workspace glowing-grid"
+      style={{ position: 'relative', overflow: 'hidden' }}
+    >
+      {/* Ambient glow orbs */}
+      <div aria-hidden style={{ position: 'absolute', top: '8%', left: '18%', width: 280, height: 280, borderRadius: '50%', background: 'radial-gradient(circle, rgba(94,106,210,0.07) 0%, transparent 70%)', filter: 'blur(40px)', pointerEvents: 'none' }} />
+      <div aria-hidden style={{ position: 'absolute', bottom: '12%', right: '12%', width: 360, height: 360, borderRadius: '50%', background: 'radial-gradient(circle, rgba(192,132,252,0.04) 0%, transparent 70%)', filter: 'blur(50px)', pointerEvents: 'none' }} />
 
-        <h1 style={{
-          fontSize: 'clamp(28px, 5vw, 42px)',
-          fontWeight: 800,
-          letterSpacing: '-0.03em',
-          lineHeight: 1.15,
-          color: 'var(--text-primary)',
-          margin: '0 0 14px',
-        }}>
-          Document{' '}
-          <span className="gradient-text">AI Assistant</span>
-        </h1>
-        <p style={{
-          fontSize: '16px', color: 'var(--text-secondary)',
-          maxWidth: '480px', margin: '0 auto', lineHeight: 1.7,
-        }}>
-          Upload documents and ask questions grounded in your files using{' '}
-          <strong style={{ color: 'var(--primary)' }}>Retrieval-Augmented Generation</strong>.
-        </p>
-      </div>
+      {/* ── Hero headline (idle only) ── */}
+      <AnimatePresence>
+        {!isUploading && (
+          <motion.div
+            key="hero"
+            style={{ ...colStyle, textAlign: 'center', marginBottom: 'var(--sp-8)' }}
+            initial={{ opacity: 0, y: -16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+          >
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              background: 'var(--accent-subtle)', border: '1px solid var(--accent-light)',
+              borderRadius: 'var(--r-full)', padding: '4px 12px',
+              marginBottom: 'var(--sp-4)',
+              fontSize: 'var(--text-2xs)', color: 'var(--accent)',
+              fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em',
+            }}>
+              <Sparkles size={11} />
+              <span>Document Intelligence OS v3.5</span>
+            </div>
+            <h1 className="workspace-title">
+              Explore the Depths of <br />
+              <span className="text-gradient">Your Documents</span>
+            </h1>
+            <p className="workspace-subtitle" style={{ marginTop: 'var(--sp-3)' }}>
+              Synthesize concepts, trace timelines, and query insights with a fully-offline semantic vector brain.
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {/* ── Upload Zone ── */}
-      <div className="animate-fade-slide-in delay-100" style={{ width: '100%', maxWidth: '560px', marginBottom: '28px' }}>
+      {/* ── Upload / Scanner zone ── */}
+      <div style={{ ...colStyle, position: 'relative', zIndex: 10, marginBottom: 'var(--sp-8)' }}>
         <input
           ref={fileInputRef}
           type="file"
           accept=".pdf,.txt"
-          onChange={handleFileChange}
+          onChange={e => { if (e.target.files?.[0]) validateAndSelect(e.target.files[0]); }}
           disabled={isUploading}
           style={{ display: 'none' }}
         />
 
-        {uploadStatus === 'error' ? (
-          <div style={{
-            border: '1.5px solid #FCA5A5', borderRadius: '20px',
-            padding: '28px', background: '#FEF2F2', textAlign: 'center',
-          }} className="animate-scale-in">
-            <AlertCircle size={28} style={{ color: '#EF4444', margin: '0 auto 12px' }} />
-            <p style={{ fontWeight: 600, color: '#991B1B', marginBottom: '6px' }}>Upload Failed</p>
-            <p style={{ fontSize: '13.5px', color: '#B91C1C', marginBottom: '16px' }}>{uploadError}</p>
-            <button onClick={onRetry} className="btn btn-primary" style={{ margin: '0 auto' }}>
-              Try Again
-            </button>
-          </div>
-        ) : isUploading ? (
-          <div style={{
-            border: '1.5px solid var(--primary)', borderRadius: '20px',
-            padding: '36px 28px', background: 'var(--surface)', textAlign: 'center',
-          }} className="animate-scale-in">
-            <div style={{
-              width: '52px', height: '52px', borderRadius: '50%',
-              background: 'linear-gradient(135deg, #2563EB, #8B5CF6)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              margin: '0 auto 16px',
-              animation: 'spin 1.5s linear infinite',
-            }}>
-              <UploadCloud size={24} color="white" />
-            </div>
-            <p style={{ fontWeight: 700, color: 'var(--text-primary)', marginBottom: '6px' }}>
-              {uploadStatus === 'indexing' ? 'Indexing document…' : 'Uploading…'}
-            </p>
-            <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '16px' }}>
-              {uploadStatus === 'indexing'
-                ? 'Generating embeddings and building vector index'
-                : 'Transferring your file to the server'}
-            </p>
-            <div className="progress-bar" style={{ maxWidth: '320px', margin: '0 auto' }}>
-              <div className="progress-fill" style={{ width: `${uploadProgress}%` }} />
-            </div>
-            <p style={{ fontSize: '12px', color: 'var(--primary)', marginTop: '8px', fontWeight: 600 }}>
-              {uploadProgress}%
-            </p>
-          </div>
-        ) : (
-          <div
-            className={`upload-zone ${isDragging ? 'dragging' : ''}`}
-            onDragEnter={handleDrag}
-            onDragOver={handleDrag}
-            onDragLeave={handleDrag}
-            onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <div style={{
-              width: '60px', height: '60px', borderRadius: '16px',
-              background: isDragging
-                ? 'linear-gradient(135deg, #2563EB, #8B5CF6)'
-                : 'var(--surface-2)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              margin: '0 auto 16px',
-              border: '1px solid var(--border)',
-              transition: 'all 0.25s ease',
-              boxShadow: isDragging ? '0 8px 24px rgba(37,99,235,0.3)' : 'none',
-            }}>
-              <UploadCloud size={26} color={isDragging ? 'white' : 'var(--primary)'} />
-            </div>
-
-            <p style={{ fontSize: '15.5px', fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 6px' }}>
-              {isDragging ? 'Drop your file here' : 'Drag & drop your document'}
-            </p>
-            <p style={{ fontSize: '13.5px', color: 'var(--text-secondary)', margin: '0 0 20px' }}>
-              or{' '}
-              <span style={{ color: 'var(--primary)', fontWeight: 600, cursor: 'pointer' }}>
-                click to browse
-              </span>
-            </p>
-
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
-              <span className="badge badge-blue">PDF</span>
-              <span className="badge badge-gray">TXT</span>
-              <span className="badge badge-gray">Max 25MB</span>
-            </div>
-          </div>
-        )}
-
-        {(fileError || (uploadStatus === 'idle' && fileError)) && (
-          <div className="animate-fade-in" style={{
-            marginTop: '10px', display: 'flex', alignItems: 'center', gap: '8px',
-            padding: '10px 14px', borderRadius: '10px',
-            background: '#FEF2F2', border: '1px solid #FCA5A5',
-            color: '#991B1B', fontSize: '13px',
-          }}>
-            <AlertCircle size={15} />
-            {fileError}
-          </div>
-        )}
-      </div>
-
-      {/* ── Suggested prompts ── */}
-      <div className="animate-fade-slide-in delay-200" style={{ width: '100%', maxWidth: '560px', marginBottom: '40px' }}>
-        <p style={{ fontSize: '12.5px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '12px', textAlign: 'center' }}>
-          Try asking
-        </p>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center' }}>
-          {SUGGESTED_PROMPTS.map((p) => (
-            <button
-              key={p.text}
-              onClick={() => onSuggestedPrompt?.(p.text)}
-              className="prompt-chip"
+        <AnimatePresence mode="wait">
+          {/* Scanning state */}
+          {isUploading ? (
+            <motion.div
+              key="scanning"
+              className="visionos-glass"
+              style={{
+                borderRadius: 'var(--r-xl)', padding: 'var(--sp-8) var(--sp-6)',
+                textAlign: 'center', position: 'relative', overflow: 'hidden',
+                minHeight: 256, display: 'flex', flexDirection: 'column',
+                alignItems: 'center', justifyContent: 'center', gap: 'var(--sp-6)',
+              }}
+              initial={{ scale: 0.97, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.97, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 350, damping: 25 }}
             >
-              <span>{p.icon}</span>
-              {p.text}
-            </button>
-          ))}
-        </div>
+              {/* Laser sweep */}
+              <div className="scanner-line" />
+
+              {/* Floating concept keywords */}
+              <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 12 }}>
+                {flyingWords.map(w => (
+                  <motion.div
+                    key={w.id}
+                    initial={{ y: 220, opacity: 0, scale: 0.8 }}
+                    animate={{ y: 16, opacity: [0, 1, 1, 0], scale: [0.8, 1.05, 1.05, 0.8] }}
+                    transition={{ duration: 2.2, ease: 'easeOut', delay: w.delay }}
+                    style={{
+                      position: 'absolute', left: w.left,
+                      fontSize: 'var(--text-2xs)', fontWeight: 700,
+                      fontFamily: 'var(--font-mono)', color: 'var(--accent)',
+                      background: 'var(--accent-subtle)', border: '1px solid var(--accent-light)',
+                      borderRadius: 'var(--r-full)', padding: '2px 8px', whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {w.word}
+                  </motion.div>
+                ))}
+              </div>
+
+              {/* Document icon */}
+              <div style={{
+                width: 72, height: 96, background: 'rgba(255,255,255,0.02)',
+                border: '1.5px solid var(--border-strong)', borderRadius: 'var(--r-lg)',
+                display: 'flex', flexDirection: 'column', alignItems: 'center',
+                justifyContent: 'center', boxShadow: 'var(--s-1)', zIndex: 15,
+              }}>
+                <FileText size={28} style={{ color: 'var(--accent)', opacity: 0.8 }} />
+                <div style={{ width: '60%', height: 3, background: 'var(--border)', margin: '6px 0 3px', borderRadius: 2 }} />
+                <div style={{ width: '45%', height: 3, background: 'var(--border)', borderRadius: 2 }} />
+              </div>
+
+              {/* Stage label + progress */}
+              <div style={{ zIndex: 15, textAlign: 'center' }}>
+                <p style={{ fontWeight: 700, fontSize: 'var(--text-md)', color: 'var(--text-primary)', margin: '0 0 4px' }}>
+                  {PIPELINE_STAGES[pipelineStage].label}…
+                </p>
+                <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', margin: '0 0 var(--sp-4)' }}>
+                  {PIPELINE_STAGES[pipelineStage].desc}
+                </p>
+                <div className="progress-track" style={{ width: 200, margin: '0 auto' }}>
+                  <div className="progress-fill" style={{ width: `${uploadProgress}%` }} />
+                </div>
+              </div>
+            </motion.div>
+
+          ) : uploadStatus === 'error' ? (
+            /* Error state */
+            <motion.div
+              key="error"
+              className="upload-error"
+              initial={{ scale: 0.97, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ type: 'spring', stiffness: 350, damping: 25 }}
+            >
+              <AlertCircle size={28} style={{ color: 'var(--error)', margin: '0 auto var(--sp-4)', display: 'block' }} />
+              <p style={{ fontWeight: 700, color: 'var(--text-primary)', marginBottom: 'var(--sp-2)', fontSize: 'var(--text-md)' }}>
+                Synthesizing halted
+              </p>
+              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', marginBottom: 'var(--sp-5)', lineHeight: 'var(--leading-relaxed)' }}>
+                {uploadError}
+              </p>
+              <button className="btn btn-primary" onClick={onRetry} style={{ margin: '0 auto' }}>
+                Restart Scanner
+              </button>
+            </motion.div>
+
+          ) : (
+            /* Idle drop zone */
+            <motion.div
+              key="idle"
+              className="upload-drop visionos-glass"
+              onDragEnter={handleDrag}
+              onDragOver={handleDrag}
+              onDragLeave={handleDrag}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+              whileHover={{ scale: 1.004 }}
+              whileTap={{ scale: 0.997 }}
+              style={{ borderRadius: 'var(--r-xl)', cursor: 'pointer' }}
+            >
+              <div style={{
+                width: 48, height: 48, borderRadius: 'var(--r-lg)',
+                background: 'var(--surface-2)', border: '1px solid var(--border)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                margin: '0 auto var(--sp-4)', color: 'var(--text-muted)',
+              }}>
+                <UploadCloud size={20} />
+              </div>
+              <p className="upload-title">Initialize Intelligence Asset</p>
+              <p className="upload-sub">
+                Drop PDF or TXT here, or <span className="upload-browse">browse files</span>
+              </p>
+              <div className="upload-badges">
+                <span className="badge badge-accent">PDF</span>
+                <span className="badge badge-default">TXT</span>
+                <span className="badge badge-default">Max 10MB</span>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Validation error */}
+        {fileError && (
+          <motion.div
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            style={{
+              marginTop: 'var(--sp-2)', display: 'flex', alignItems: 'center', gap: 'var(--sp-2)',
+              padding: 'var(--sp-2) var(--sp-3)', borderRadius: 'var(--r-md)',
+              background: 'var(--error-subtle)', color: 'var(--error)', fontSize: 'var(--text-xs)',
+            }}
+          >
+            <AlertCircle size={14} />
+            {fileError}
+          </motion.div>
+        )}
       </div>
 
-      {/* ── Feature cards ── */}
-      <div className="animate-fade-slide-in delay-300" style={{ width: '100%', maxWidth: '720px' }}>
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-          gap: '14px',
-        }}>
-          {FEATURES.map((f) => (
-            <div key={f.title} className="feature-card">
-              <div style={{
-                width: '44px', height: '44px', borderRadius: '12px',
-                background: `${f.color}15`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                margin: '0 auto 12px', color: f.color,
-              }}>
-                {f.icon}
+      {/* ── Prompt chips (idle only) ── */}
+      {!isUploading && (
+        <motion.div
+          style={{ ...colStyle, marginBottom: 'var(--sp-8)' }}
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ type: 'spring', stiffness: 300, damping: 25, delay: 0.1 }}
+        >
+          <div className="prompt-chips">
+            {SUGGESTED_PROMPTS.map(p => (
+              <button key={p.text} className="prompt-chip" onClick={() => onSuggestedPrompt?.(p.text)}>
+                <span style={{ fontSize: 11 }}>{p.icon}</span>
+                {p.text}
+              </button>
+            ))}
+          </div>
+        </motion.div>
+      )}
+
+      {/* ── Feature cards (idle only) — 3-column, equal gutters ── */}
+      {!isUploading && (
+        <motion.div
+          style={colStyle}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ type: 'spring', stiffness: 300, damping: 25, delay: 0.18 }}
+        >
+          <div className="feature-grid">
+            {FEATURE_CARDS.map(({ color, Icon, title, desc }) => (
+              <div key={title} className="feature-card">
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  color, fontSize: 'var(--text-xs)', fontWeight: 700,
+                  textTransform: 'uppercase', letterSpacing: '0.05em',
+                  marginBottom: 'var(--sp-2)',
+                }}>
+                  <Icon size={12} />
+                  <span>{title}</span>
+                </div>
+                <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', margin: 0, lineHeight: 'var(--leading-relaxed)' }}>
+                  {desc}
+                </p>
               </div>
-              <h3 style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 6px' }}>
-                {f.title}
-              </h3>
-              <p style={{ fontSize: '12.5px', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
-                {f.desc}
-              </p>
-            </div>
-          ))}
-        </div>
-      </div>
+            ))}
+          </div>
+        </motion.div>
+      )}
     </div>
   );
 }

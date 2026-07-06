@@ -1,85 +1,80 @@
 """
-rag.py — Production-grade Gemini integration for Document AI Assistant.
+rag.py — Production-grade Groq integration for Document AI Assistant.
 
 Features:
-- Model loaded from MODEL_NAME env var (no hardcoded names)
-- Automatic fallback chain: gemini-2.5-flash → gemini-2.5-flash-lite → gemini-1.5-flash
-- Startup model validation via models.list() (zero extra quota usage)
+- Model loaded from MODEL_NAME env var (default: llama-3.3-70b-versatile)
+- Automatic fallback chain: llama-3.3-70b-versatile → llama-3.1-8b-instant → mixtral-8x7b-32768
+- Startup model validation via models.list()
 - Masked API key logging
-- Structured error payloads (no raw exception dumps to client)
-- Custom exception classes for quota vs. generic API errors
-- list_available_models() utility for the /models debug endpoint
+- Custom exception classes matching original names for app.py compatibility
 """
 
 import os
+import time
 import logging
 from typing import List, Dict, Any, Generator
 
-from google import genai
-from google.genai import types
+from groq import Groq  # type: ignore
 
 from prompts import SYSTEM_PROMPT, USER_PROMPT_TEMPLATE, format_context_chunks
+from utils import validate_groq_api_key
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
 logger = logging.getLogger(__name__)
 
 # ─── Fallback chain (order matters) ───────────────────────────────────────────
 FALLBACK_MODELS: List[str] = [
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
-    "gemini-1.5-flash",
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "mixtral-8x7b-32768",
+    "gemma2-9b-it"
 ]
 
 # ─── Module-level singletons ──────────────────────────────────────────────────
-_client: genai.Client | None = None
+_client: Groq | None = None
 _active_model: str | None = None
 
 
-# ─── Custom exceptions ────────────────────────────────────────────────────────
+# ─── Custom exceptions (names preserved for app.py compatibility) ───────────────
 class GeminiQuotaError(Exception):
-    """Raised when the API key hits a rate/quota limit (HTTP 429)."""
+    """Raised when the Groq API key hits a rate/quota limit (HTTP 429)."""
+    pass
 
 
 class GeminiAPIError(Exception):
-    """Raised for any other Gemini API failure."""
+    """Raised for any other Groq API failure."""
+    pass
 
 
 # ─── Client factory (singleton) ───────────────────────────────────────────────
-def _get_client() -> genai.Client:
+def _get_client() -> Groq:
     global _client
     if _client is None:
-        api_key = os.getenv("GEMINI_API_KEY", "").strip()
-        if not api_key:
-            raise RuntimeError(
-                "GEMINI_API_KEY is not set. Add it to backend/.env and restart."
-            )
-        _client = genai.Client(api_key=api_key)
-        # Log masked key (first 4 + last 4 characters only)
+        api_key = os.getenv("GROQ_API_KEY", "").strip()
+        validate_groq_api_key(api_key)
+        _client = Groq(api_key=api_key)
+        # Log masked key
         masked = f"{api_key[:4]}{'*' * (len(api_key) - 8)}{api_key[-4:]}"
-        logger.info(f"✅ Gemini client initialised. API key: {masked}")
+        logger.info(f"✅ Groq client initialised. API key: {masked}")
     return _client
 
 
 # ─── Available-model helpers ──────────────────────────────────────────────────
-def _normalize_model_name(name: str) -> str:
-    """Strip the 'models/' prefix that the SDK sometimes returns."""
-    return name.replace("models/", "").strip()
-
-
 def list_available_models() -> List[Dict[str, str]]:
     """
-    Return all Gemini models visible to the current API key.
-    Uses the SDK's models.list() — zero quota cost.
+    Return all Groq models visible to the current API key.
+    Uses the SDK's models.list().
     """
     client = _get_client()
     results: List[Dict[str, str]] = []
     try:
-        for m in client.models.list():
+        models = client.models.list()
+        for m in models.data:
             results.append(
                 {
-                    "name": _normalize_model_name(m.name),
-                    "display_name": getattr(m, "display_name", ""),
-                    "description": getattr(m, "description", ""),
+                    "name": m.id,
+                    "display_name": m.id,
+                    "description": f"Groq Model {m.id}",
                 }
             )
     except Exception as exc:
@@ -87,29 +82,19 @@ def list_available_models() -> List[Dict[str, str]]:
     return results
 
 
-def _get_available_model_names() -> List[str]:
-    """Return just the normalised model name strings."""
-    return [m["name"] for m in list_available_models()]
-
-
 # ─── Startup validation ───────────────────────────────────────────────────────
 def initialize_model() -> str:
     """
     Called once at FastAPI startup.
-    1. Reads MODEL_NAME from env (default: gemini-2.5-flash).
-    2. Checks whether that model is available via models.list().
-    3. If not, walks the FALLBACK_MODELS chain until one is found.
-    4. Sets _active_model and returns it.
-    Never crashes — worst case defaults to the last fallback.
     """
     global _active_model
 
-    configured = os.getenv("MODEL_NAME", "gemini-2.5-flash").strip()
+    configured = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile").strip()
     logger.info(f"Configured MODEL_NAME: '{configured}'")
 
     try:
-        available = _get_available_model_names()
-        logger.info(f"Available Gemini models for this key: {available}")
+        available = [m["name"] for m in list_available_models()]
+        logger.info(f"Available Groq models for this key: {available}")
     except Exception as exc:
         logger.error(f"Could not fetch model list at startup: {exc}")
         available = []
@@ -119,9 +104,8 @@ def initialize_model() -> str:
 
     for candidate in chain:
         if not available or candidate in available:
-            # If we couldn't fetch the list, optimistically try the configured model
             _active_model = candidate
-            logger.info(f"✅ Active Gemini model set to: '{_active_model}'")
+            logger.info(f"✅ Active Groq model set to: '{_active_model}'")
             return _active_model
         logger.warning(
             f"⚠️  Model '{candidate}' not in available list, trying next fallback..."
@@ -139,7 +123,6 @@ def initialize_model() -> str:
 def get_active_model() -> str:
     """Return the validated active model, falling back gracefully if startup wasn't called."""
     if _active_model is None:
-        # Lazy fallback — should not normally happen in production
         return os.getenv("MODEL_NAME", FALLBACK_MODELS[0]).strip()
     return _active_model
 
@@ -148,7 +131,7 @@ def get_active_model() -> str:
 def _classify_error(exc: Exception) -> Exception:
     """Wrap raw SDK exceptions into domain-specific exceptions."""
     msg = str(exc)
-    if "429" in msg or "RESOURCE_EXHAUSTED" in msg or "quota" in msg.lower():
+    if "429" in msg or "rate limit" in msg.lower():
         return GeminiQuotaError(msg)
     return GeminiAPIError(msg)
 
@@ -159,9 +142,7 @@ def generate_answer_stream(
     context_chunks: List[Dict[str, Any]],
 ) -> Generator[str, None, None]:
     """
-    Streams response tokens from Gemini.
-    Raises GeminiQuotaError or GeminiAPIError on failure
-    so the caller (app.py SSE generator) can emit a clean error event.
+    Streams response tokens from Groq.
     """
     client = _get_client()
     model = get_active_model()
@@ -171,23 +152,41 @@ def generate_answer_stream(
         context_text=context_text, question=question
     )
 
-    logger.info(f"[CHAT STREAM] Calling model: '{model}'")
-    try:
-        response = client.models.generate_content_stream(
-            model=model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
-                temperature=0.2,
-            ),
-        )
-        for chunk in response:
-            if chunk.text:
-                yield chunk.text
+    max_retries = 3
+    retry_delay = 2.0
 
-    except Exception as exc:
-        logger.error(f"[CHAT STREAM] Gemini error on model '{model}': {exc}")
-        raise _classify_error(exc) from exc
+    logger.info(f"[CHAT STREAM] Calling Groq model: '{model}'")
+    
+    for attempt in range(max_retries):
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.2,
+                stream=True,
+            )
+            for chunk in response:
+                content = chunk.choices[0].delta.content
+                if content:
+                    yield content
+            return  # Success, exit the function
+
+        except Exception as exc:
+            classified = _classify_error(exc)
+            if isinstance(classified, GeminiQuotaError) and attempt < max_retries - 1:
+                logger.warning(
+                    f"[CHAT STREAM] Rate limit hit (429), retrying in {retry_delay}s... "
+                    f"(Attempt {attempt + 1}/{max_retries})"
+                )
+                time.sleep(retry_delay)
+                retry_delay *= 1.5
+                continue
+            
+            logger.error(f"[CHAT STREAM] Groq error on model '{model}': {exc}")
+            raise classified from exc
 
 
 def generate_answer(
@@ -196,7 +195,6 @@ def generate_answer(
 ) -> Dict[str, Any]:
     """
     Non-streaming generation.
-    Returns {"text": str} on success or {"error": str, "details": str} on failure.
     """
     client = _get_client()
     model = get_active_model()
@@ -206,31 +204,41 @@ def generate_answer(
         context_text=context_text, question=question
     )
 
-    logger.info(f"[CHAT] Calling model (non-stream): '{model}'")
-    try:
-        response = client.models.generate_content(
-            model=model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
-                temperature=0.2,
-            ),
-        )
-        return {"text": response.text}
+    max_retries = 3
+    retry_delay = 2.0
 
-    except Exception as exc:
-        logger.error(f"[CHAT] Gemini error on model '{model}': {exc}")
-        classified = _classify_error(exc)
-        if isinstance(classified, GeminiQuotaError):
+    logger.info(f"[CHAT] Calling Groq model (non-stream): '{model}'")
+    
+    for attempt in range(max_retries):
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.2,
+            )
+            return {"text": response.choices[0].message.content}
+
+        except Exception as exc:
+            classified = _classify_error(exc)
+            if isinstance(classified, GeminiQuotaError) and attempt < max_retries - 1:
+                logger.warning(
+                    f"[CHAT] Rate limit hit (429), retrying in {retry_delay}s... "
+                    f"(Attempt {attempt + 1}/{max_retries})"
+                )
+                time.sleep(retry_delay)
+                retry_delay *= 1.5
+                continue
+
+            logger.error(f"[CHAT] Groq error on model '{model}': {exc}")
+            if isinstance(classified, GeminiQuotaError):
+                return {
+                    "error": "Groq API quota exceeded.",
+                    "details": "Your API key has hit the rate limit. Please try again in a minute.",
+                }
             return {
-                "error": "Gemini API quota exceeded.",
-                "details": (
-                    "Your API key has hit the free-tier rate limit. "
-                    "Please check your quota at https://ai.google.dev/gemini-api/docs/rate-limits "
-                    "or upgrade your plan."
-                ),
+                "error": "Groq API error.",
+                "details": "An unexpected error occurred. Check backend logs for details.",
             }
-        return {
-            "error": "Gemini API error.",
-            "details": "An unexpected error occurred. Check backend logs for details.",
-        }

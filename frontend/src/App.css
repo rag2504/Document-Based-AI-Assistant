@@ -1,1 +1,5 @@
-/* App.css – intentionally minimal; all styles live in index.css */
+/* App-level overrides — intentionally minimal */
+#root {
+  height: 100dvh;
+  overflow: hidden;
+}

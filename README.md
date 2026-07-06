@@ -1,48 +1,47 @@
 # 📄 Document-Based AI Assistant
 
-A production-ready **Retrieval-Augmented Generation (RAG)** application that allows users to upload PDF or TXT documents and ask AI-powered questions strictly grounded in the document's contents. No hallucinations. Full citations.
+A production-ready **Retrieval-Augmented Generation (RAG)** application that allows users to upload PDF or TXT documents and ask AI-powered questions strictly grounded in the document's contents. No hallucinations. Full citations. All data is backed by a fully persistent, anonymous session system.
 
 ---
 
 ## 🏗 Architecture
 
 ```
-User Browser
+User Browser (localStorage docai_session)
      │
      ▼
 ┌──────────────────────────────────┐
 │  React Frontend (Vite + Tailwind)│
+│  Deployed on Vercel              │
 │  ┌────────────┐  ┌─────────────┐ │
 │  │ Upload UI  │  │  Chat UI    │ │
 │  │ Drag/Drop  │  │  Streaming  │ │
 │  └────────────┘  └─────────────┘ │
 └──────────────┬───────────────────┘
-               │ HTTP / SSE
+               │ HTTP / SSE (with x-session-id)
                ▼
 ┌──────────────────────────────────┐
 │  FastAPI Backend                 │
+│  Deployed on Render              │
 │                                  │
 │  POST /upload                    │
 │   └─► document_loader.py         │
-│        ├─ PyMuPDF (PDF)          │
-│        └─ plain text (TXT)       │
-│   └─► Chunking (700 / 150 chars) │
-│   └─► embeddings.py              │
-│        └─ all-MiniLM-L6-v2       │
-│   └─► vector_store.py → ChromaDB │
+│   └─► Chunking & Embeddings      │
+│   └─► vector_store.py → Supabase │
 │                                  │
 │  POST /chat                      │
 │   └─► Embed question             │
-│   └─► Similarity search (Top 5) │
+│   └─► Supabase Similarity Search │
 │   └─► rag.py → Gemini API        │
 │   └─► SSE stream back to browser │
 └──────────────────────────────────┘
                │
                ▼
 ┌──────────────────────────────────┐
-│  Persistent ChromaDB             │
-│  Collection: "documents"         │
-│  Storage:    backend/chroma_db/  │
+│  Supabase (PostgreSQL + pgvector)│
+│  Deployed on Supabase            │
+│  Tables: documents, chunks,      │
+│          conversations, messages │
 └──────────────────────────────────┘
 ```
 
@@ -52,58 +51,14 @@ User Browser
 
 | Layer | Technology |
 |---|---|
-| Frontend | React 18, Vite, Tailwind CSS |
+| Frontend | React 18, Vite, Tailwind CSS (Vercel) |
 | HTTP Client | Axios |
-| Markdown | react-markdown |
-| Icons | lucide-react |
-| Backend | FastAPI, Python 3.11 |
+| Backend | FastAPI, Python 3.11 (Render) |
 | PDF Parsing | PyMuPDF (fitz) |
-| Chunking | Custom sliding-window |
 | Embedding | sentence-transformers/all-MiniLM-L6-v2 |
-| Vector DB | ChromaDB (persistent) |
+| Vector DB | Supabase PostgreSQL with `pgvector` |
 | LLM | Google Gemini 1.5 Flash |
 | Streaming | Server-Sent Events (SSE) |
-
----
-
-## 📁 Folder Structure
-
-```
-document-ai-assistant/
-├── backend/
-│   ├── app.py               # FastAPI entry point
-│   ├── rag.py               # Gemini LLM generation
-│   ├── embeddings.py        # SentenceTransformer model
-│   ├── document_loader.py   # PDF/TXT parsing & chunking
-│   ├── vector_store.py      # ChromaDB interface
-│   ├── prompts.py           # System & user prompt templates
-│   ├── utils.py             # File validation helpers
-│   ├── uploads/             # Saved uploaded documents
-│   ├── chroma_db/           # Persistent vector database
-│   ├── requirements.txt
-│   └── .env.example
-├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── Navbar.jsx
-│   │   │   ├── UploadArea.jsx
-│   │   │   ├── UploadProgress.jsx
-│   │   │   ├── ChatWindow.jsx
-│   │   │   ├── ChatInput.jsx
-│   │   │   ├── MessageBubble.jsx
-│   │   │   ├── SourceAccordion.jsx
-│   │   │   ├── EmptyState.jsx
-│   │   │   └── LoadingSkeleton.jsx
-│   │   ├── App.jsx
-│   │   ├── main.jsx
-│   │   └── index.css
-│   ├── index.html
-│   ├── package.json
-│   ├── tailwind.config.js
-│   ├── postcss.config.js
-│   └── vite.config.js
-└── README.md
-```
 
 ---
 
@@ -114,10 +69,19 @@ document-ai-assistant/
 - Python 3.11+
 - Node.js 18+
 - A [Google Gemini API Key](https://ai.google.dev/)
+- A [Supabase](https://supabase.com/) Project
 
 ---
 
-### 1. Backend Setup
+### 1. Database Setup (Supabase)
+
+1. Create a new Supabase project.
+2. Go to the SQL Editor in your Supabase dashboard.
+3. Copy the contents of `backend/schema.sql` and run it to create all necessary tables, functions, and the `pgvector` extension.
+
+---
+
+### 2. Backend Setup
 
 ```bash
 cd document-ai-assistant/backend
@@ -136,26 +100,23 @@ pip install -r requirements.txt
 
 # Configure environment variables
 cp .env.example .env
-# Edit .env and set your GEMINI_API_KEY
+```
+
+Edit `.env` and set:
+```env
+GEMINI_API_KEY=your_google_gemini_api_key_here
+SUPABASE_URL=your_supabase_project_url
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
 ```
 
 **Start the backend:**
-
-```powershell
-.\venv\Scripts\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
-```
-
-On macOS/Linux:
-
 ```bash
-./venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
+uvicorn app:app --host 127.0.0.1 --port 8000 --reload
 ```
-
-The API will be live at: `http://localhost:8000`
 
 ---
 
-### 2. Frontend Setup
+### 3. Frontend Setup
 
 ```bash
 cd document-ai-assistant/frontend
@@ -167,157 +128,52 @@ npm install
 npm run dev
 ```
 
-The app will open at: `http://localhost:5173`
-
 ---
 
 ## 🔐 Environment Variables
 
-Create `backend/.env` with:
+### Backend (`backend/.env`)
+- `GEMINI_API_KEY`: API Key for Google Gemini LLM.
+- `SUPABASE_URL`: The URL for your Supabase project.
+- `SUPABASE_SERVICE_ROLE_KEY`: The Service Role key for your Supabase project (used for backend db access).
+- `ALLOWED_ORIGINS`: Comma separated list of allowed CORS origins (for Render deployment).
 
-```env
-# Required
-GEMINI_API_KEY=your_google_gemini_api_key_here
-```
+### Frontend (`frontend/.env`)
+- `VITE_API_URL`: The URL to your FastAPI backend (default: `http://localhost:8000`).
 
 ---
 
 ## 🔬 How It Works
 
-### Document Chunking
+### Anonymous Session System
+When a user visits the app for the first time, a random UUID is generated and stored in their browser's `localStorage` (`docai_session`). Every request to the backend includes this UUID via the `x-session-id` header. 
 
-Uploaded documents are split into **overlapping text chunks** using a sliding window algorithm:
+This enables a completely anonymous, yet persistent experience similar to ChatGPT:
+- Refreshing the page automatically restores previous conversations, uploaded documents, and chat history.
+- Everything is stored in Supabase under that `session_id`.
+- Clicking "Reset" only deletes the data belonging to the current user.
 
-- **Chunk Size:** 700 characters
-- **Overlap:** 150 characters
+### Document Chunking & Embeddings
+Uploaded documents are split into overlapping text chunks (700 chars, 150 char overlap) and embedded using the local `sentence-transformers/all-MiniLM-L6-v2` model into 384-dimensional dense vectors.
 
-Each chunk stores: `chunk_id`, `page_number`, `filename`, and `chunk_text`.
-
-This ensures context continuity across chunk boundaries so no information is lost.
-
----
-
-### Embeddings
-
-Text chunks (and user queries) are converted into **384-dimensional dense vectors** using the `sentence-transformers/all-MiniLM-L6-v2` model, which runs locally without any external API calls.
-
-The model is loaded once on startup and reused for all requests (singleton pattern).
-
----
-
-### Retrieval
-
-When the user asks a question:
-1. The question is embedded using the same MiniLM model.
-2. ChromaDB performs a **cosine similarity search** against all stored chunk embeddings filtered by the active filename.
-3. The **top 5** most relevant chunks are retrieved and formatted as context.
-
----
-
-### ChromaDB (Persistent Storage)
-
-Embeddings are stored in a **persistent ChromaDB** instance at `backend/chroma_db/`. This means:
-
-- ✅ Embeddings survive backend restarts.
-- ✅ Re-uploading the same file skips re-indexing (cache check by filename).
-- ✅ No wasted compute.
-
----
+### Supabase `pgvector` Retrieval
+Embeddings are stored in Supabase alongside document metadata. When asking a question:
+1. The question is embedded using the MiniLM model.
+2. A custom PostgreSQL RPC function (`match_document_chunks`) performs an exact cosine similarity search across the vector index.
+3. The top 5 chunks are retrieved and sent to Gemini.
 
 ### LLM Generation (Gemini)
-
-The retrieved chunks are passed to **Google Gemini 1.5 Flash** alongside a strict system prompt that enforces:
-
-- Answer only using the provided context.
-- Never use outside knowledge.
-- Respond with a specific fallback message if the answer is not found.
-- Include page numbers wherever possible.
-
-Responses are **streamed token-by-token** back to the browser via Server-Sent Events (SSE).
+Gemini receives a strict system prompt enforcing citations and preventing hallucinations. The response is streamed token-by-token using SSE back to the browser.
 
 ---
 
-## 📡 API Documentation
+## 🚀 Deployment
 
-### `POST /upload`
+The application is fully production-ready for deployment:
 
-Upload a document for indexing.
-
-**Request:** `multipart/form-data` with field `file` (PDF or TXT).
-
-**Response:**
-```json
-{
-  "success": true,
-  "filename": "sample.pdf",
-  "chunks": 148,
-  "message": "File uploaded and indexed successfully."
-}
-```
-
----
-
-### `POST /chat`
-
-Ask a question about the indexed document (SSE streaming).
-
-**Request body:**
-```json
-{
-  "question": "What is the refund policy?",
-  "filename": "sample.pdf",
-  "stream": true
-}
-```
-
-**SSE Events:**
-| Event | Data |
-|---|---|
-| `sources` | JSON array of top-5 relevant chunks |
-| `text` | Streaming tokens from Gemini |
-| `end` | `[DONE]` signal |
-
----
-
-### `POST /clear`
-
-Reset the active document session.
-
-**Response:**
-```json
-{ "success": true, "message": "Active document reset." }
-```
-
----
-
-## 🚀 Features
-
-- ✅ Drag & drop or browse file upload
-- ✅ Real-time upload & indexing progress
-- ✅ Cached indexing (no re-embedding same file)
-- ✅ SSE streaming chat responses
-- ✅ Grounded answers with zero hallucination
-- ✅ Page-level citation sources
-- ✅ Collapsible source accordion
-- ✅ Copy AI response to clipboard
-- ✅ Download full conversation as Markdown
-- ✅ Clear chat history
-- ✅ Responsive design (desktop, tablet, mobile)
-- ✅ Loading skeletons & typing animations
-
----
-
-## 📈 Future Improvements
-
-- [ ] Multi-document support with active document switching
-- [ ] OpenAI GPT-4o model as an alternative backend
-- [ ] User authentication and per-user document isolation
-- [ ] Document summary generation on upload
-- [ ] Highlight the exact sentence from the PDF that sourced the answer
-- [ ] Re-ranking retrieved chunks with a cross-encoder
-- [ ] Support for DOCX, Markdown, and HTML documents
-- [ ] Docker Compose deployment configuration
-- [ ] Cloud deployment guide (Render, Railway, Vercel)
+- **Frontend**: Deploy `frontend/` to **Vercel**. Set the `VITE_API_URL` environment variable to your Render backend URL.
+- **Backend**: Deploy `backend/` to **Render** using a Web Service. Set the environment variables `GEMINI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `ALLOWED_ORIGINS` (pointing to your Vercel URL).
+- **Database**: Use your **Supabase** project. Ensure `schema.sql` is fully executed.
 
 ---
 

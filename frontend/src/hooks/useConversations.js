@@ -1,54 +1,51 @@
 import { useState, useCallback, useEffect } from 'react';
 
-const STORAGE_KEY = 'docai_conversations';
 const ACTIVE_KEY = 'docai_active_conversation';
 
 function generateId() {
-  return Math.random().toString(36).substring(2, 10);
+  return crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 10);
 }
 
-function generateTitle(firstMessage) {
-  if (!firstMessage) return 'New Chat';
-  const truncated = firstMessage.trim().slice(0, 50);
-  return truncated.length < firstMessage.trim().length ? truncated + '…' : truncated;
-}
-
-function loadFromStorage() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveToStorage(conversations) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
-  } catch { /* ignore */ }
-}
-
-export function useConversations() {
-  const [conversations, setConversations] = useState(() => loadFromStorage());
+export function useConversations(initialConversations = []) {
+  const [conversations, setConversations] = useState(initialConversations);
   const [activeId, setActiveId] = useState(() => {
-    try { return localStorage.getItem(ACTIVE_KEY) || null; } catch { return null; }
+    try {
+      return localStorage.getItem(ACTIVE_KEY) || null;
+    } catch {
+      return null;
+    }
   });
-
-  // Persist conversations whenever they change
-  useEffect(() => {
-    saveToStorage(conversations);
-  }, [conversations]);
 
   // Persist active ID
   useEffect(() => {
     try {
-      if (activeId) localStorage.setItem(ACTIVE_KEY, activeId);
-      else localStorage.removeItem(ACTIVE_KEY);
+      if (activeId) {
+        localStorage.setItem(ACTIVE_KEY, activeId);
+      } else {
+        localStorage.removeItem(ACTIVE_KEY);
+      }
     } catch { /* ignore */ }
   }, [activeId]);
 
   // Derive active conversation
   const activeConversation = conversations.find((c) => c.id === activeId) || null;
+
+  // Set initial data from server
+  const setServerData = useCallback((serverConversations) => {
+    setConversations(serverConversations);
+    
+    // Check if the saved active ID exists in the fetched list
+    const isValid = serverConversations.some((c) => c.id === activeId);
+    
+    if (serverConversations.length > 0) {
+      if (!activeId || !isValid) {
+        // Fallback to the most recent conversation
+        setActiveId(serverConversations[0].id);
+      }
+    } else {
+      setActiveId(null);
+    }
+  }, [activeId]);
 
   // Create a new empty conversation
   const createNewChat = useCallback((documentName = null) => {
@@ -71,10 +68,9 @@ export function useConversations() {
       prev.map((conv) => {
         if (conv.id !== activeId) return conv;
         const newMessages = [...conv.messages, message];
-        // Auto-set title from first user message
         const title =
           conv.title === 'New Chat' && message.role === 'user'
-            ? generateTitle(message.content)
+            ? (message.content.trim().slice(0, 50) + (message.content.trim().length > 50 ? '…' : ''))
             : conv.title;
         return { ...conv, messages: newMessages, title };
       })
@@ -138,10 +134,18 @@ export function useConversations() {
     );
   }, [activeId]);
 
+  // Toggle pin for a conversation
+  const pinConversation = useCallback((id) => {
+    setConversations((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, pinned: !c.pinned } : c))
+    );
+  }, []);
+
   return {
     conversations,
     activeConversation,
     activeId,
+    setServerData,
     createNewChat,
     addMessage,
     updateLastAssistantMessage,
@@ -150,5 +154,7 @@ export function useConversations() {
     renameConversation,
     switchConversation,
     setDocumentName,
+    setActiveId,
+    pinConversation,
   };
 }

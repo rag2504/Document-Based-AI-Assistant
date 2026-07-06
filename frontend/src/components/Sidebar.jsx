@@ -1,8 +1,9 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plus, MessageSquare, Trash2, Pencil, Check, X,
-  FileText, ChevronLeft, Layers, Settings, Moon, Sun,
-  Clock
+  FileText, ChevronLeft, Settings, Moon, Sun,
+  Search, Pin, PinOff, Keyboard, Zap
 } from 'lucide-react';
 
 export default function Sidebar({
@@ -14,261 +15,281 @@ export default function Sidebar({
   onSwitchChat,
   onDeleteChat,
   onRenameChat,
+  onPinChat,
   activeDocument,
   theme,
   onToggleTheme,
+  onOpenCommandPalette,
+  onOpenShortcuts,
+  isMobile,
 }) {
   const [editingId, setEditingId] = useState(null);
   const [editTitle, setEditTitle] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const editRef = useRef(null);
 
   useEffect(() => {
     if (editingId && editRef.current) editRef.current.focus();
   }, [editingId]);
 
-  const startRename = (e, conv) => {
+  const startRename = useCallback((e, conv) => {
     e.stopPropagation();
     setEditingId(conv.id);
     setEditTitle(conv.title);
-  };
+  }, []);
 
-  const commitRename = (id) => {
+  const commitRename = useCallback((id) => {
     if (editTitle.trim()) onRenameChat(id, editTitle.trim());
     setEditingId(null);
-  };
+  }, [editTitle, onRenameChat]);
 
-  const handleRenameKey = (e, id) => {
+  const handleRenameKey = useCallback((e, id) => {
     if (e.key === 'Enter') commitRename(id);
     if (e.key === 'Escape') setEditingId(null);
-  };
+  }, [commitRename]);
 
   const formatTime = (iso) => {
-    const date = new Date(iso);
-    const now = new Date();
-    const diffMs = now - date;
-    const diffDays = Math.floor(diffMs / 86400000);
-    if (diffDays === 0) return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    if (diffDays === 1) return 'Yesterday';
-    if (diffDays < 7) return `${diffDays}d ago`;
-    return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    try {
+      const date = new Date(iso);
+      const now = new Date();
+      const diffMs = now - date;
+      const diffDays = Math.floor(diffMs / 86400000);
+      if (diffDays === 0) return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      if (diffDays === 1) return 'Yesterday';
+      if (diffDays < 7) return `${diffDays}d ago`;
+      return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    } catch { return ''; }
+  };
+
+  const filtered = searchQuery.trim()
+    ? conversations.filter(c => c.title.toLowerCase().includes(searchQuery.toLowerCase()))
+    : conversations;
+
+  const pinned = filtered.filter(c => c.pinned);
+
+  const now = new Date();
+  const sod = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const soy = sod - 86400000;
+  const so7 = sod - 6 * 86400000;
+
+  const unpinned = filtered.filter(c => !c.pinned);
+  const today     = unpinned.filter(c => new Date(c.createdAt).getTime() >= sod);
+  const yesterday = unpinned.filter(c => { const t = new Date(c.createdAt).getTime(); return t >= soy && t < sod; });
+  const last7     = unpinned.filter(c => { const t = new Date(c.createdAt).getTime(); return t >= so7 && t < soy; });
+  const older     = unpinned.filter(c => new Date(c.createdAt).getTime() < so7);
+
+  const groups = [
+    { label: 'Pinned', items: pinned },
+    { label: 'Today', items: today },
+    { label: 'Yesterday', items: yesterday },
+    { label: 'Previous 7 Days', items: last7 },
+    { label: 'Older', items: older },
+  ].filter(g => g.items.length > 0);
+
+  const sidebarVariants = {
+    open:   { x: 0, transition: { type: 'spring', stiffness: 300, damping: 30 } },
+    closed: { x: '-100%', transition: { type: 'spring', stiffness: 400, damping: 40 } },
+  };
+
+  const sidebarClasses = [
+    'sidebar',
+    isMobile && isOpen ? 'mobile-open' : '',
+    !isMobile && !isOpen ? 'collapsed' : '',
+  ].filter(Boolean).join(' ');
+
+  const ConvItem = ({ conv }) => {
+    const isActive = conv.id === activeId;
+    const isEditing = editingId === conv.id;
+
+    return (
+      <div
+        className={`sidebar-item ${isActive ? 'active' : ''}`}
+        onClick={() => { if (!isEditing) { onSwitchChat(conv.id); if (isMobile) onClose(); } }}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => e.key === 'Enter' && !isEditing && onSwitchChat(conv.id)}
+        aria-current={isActive ? 'page' : undefined}
+      >
+        {isEditing ? (
+          <div style={{ display: 'flex', flex: 1, alignItems: 'center', gap: 4 }} onClick={e => e.stopPropagation()}>
+            <input
+              ref={editRef}
+              value={editTitle}
+              onChange={e => setEditTitle(e.target.value)}
+              onKeyDown={e => handleRenameKey(e, conv.id)}
+              onBlur={() => commitRename(conv.id)}
+              className="sidebar-rename-input"
+            />
+            <button className="sidebar-icon-btn" onClick={() => commitRename(conv.id)} title="Save">
+              <Check size={12} />
+            </button>
+            <button className="sidebar-icon-btn" onClick={() => setEditingId(null)} title="Cancel">
+              <X size={12} />
+            </button>
+          </div>
+        ) : (
+          <>
+            <MessageSquare size={13} style={{ flexShrink: 0, color: isActive ? 'var(--accent)' : 'var(--text-muted)', marginRight: 2 }} />
+            <span className="sidebar-item-text">{conv.title}</span>
+            <span className="sidebar-item-time">{formatTime(conv.createdAt)}</span>
+            <div className="sidebar-item-actions" onClick={e => e.stopPropagation()}>
+              {onPinChat && (
+                <button
+                  className="sidebar-icon-btn"
+                  onClick={() => onPinChat(conv.id)}
+                  title={conv.pinned ? 'Unpin' : 'Pin'}
+                >
+                  {conv.pinned ? <PinOff size={12} /> : <Pin size={12} />}
+                </button>
+              )}
+              <button className="sidebar-icon-btn" onClick={e => startRename(e, conv)} title="Rename">
+                <Pencil size={12} />
+              </button>
+              <button className="sidebar-icon-btn danger" onClick={() => onDeleteChat(conv.id)} title="Delete">
+                <Trash2 size={12} />
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    );
   };
 
   return (
     <>
       {/* Mobile overlay */}
-      {isOpen && (
-        <div className="sidebar-overlay md:hidden" onClick={onClose} />
-      )}
+      <AnimatePresence>
+        {isMobile && isOpen && (
+          <motion.div
+            className="sidebar-overlay"
+            onClick={onClose}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+          />
+        )}
+      </AnimatePresence>
 
-      <aside className={`sidebar ${isOpen ? 'open' : ''}`} style={{ width: '280px' }}>
-        {/* ── Logo ── */}
-        <div style={{
-          padding: '20px 16px 16px',
-          borderBottom: '1px solid var(--sidebar-border)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div style={{
-              width: '36px', height: '36px',
-              borderRadius: '10px',
-              background: 'linear-gradient(135deg, #2563EB, #8B5CF6)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              boxShadow: '0 4px 12px rgba(37,99,235,0.3)',
-              flexShrink: 0,
-            }}>
-              <Layers size={18} color="white" />
+      <aside className={sidebarClasses} aria-label="Navigation sidebar">
+        {/* ── Header ── */}
+        <div className="sidebar-header">
+          <div className="sidebar-brand">
+            <div className="sidebar-logo">
+              <Zap size={14} />
             </div>
-            <div>
-              <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>
-                DocAI
+            <span className="sidebar-brand-text">Omnidoc</span>
+          </div>
+          <button
+            className="sidebar-icon-btn"
+            onClick={onClose}
+            aria-label="Collapse sidebar"
+            title="Collapse sidebar"
+          >
+            <ChevronLeft size={16} />
+          </button>
+        </div>
+
+        {/* ── Search / Command ── */}
+        <div className="sidebar-search">
+          <button
+            className="sidebar-search-input"
+            onClick={onOpenCommandPalette}
+            aria-label="Open command palette"
+          >
+            <Search size={13} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+            <span>Search or jump to…</span>
+            <span className="sidebar-search-kbd">⌘K</span>
+          </button>
+        </div>
+
+        {/* ── Inline search filter ── */}
+        <div style={{ padding: '0 var(--sp-3) var(--sp-1)' }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 'var(--sp-2)',
+            padding: '0 var(--sp-3)', borderRadius: 'var(--r-md)',
+            border: '1px solid var(--border)', background: 'var(--bg)',
+            height: 32,
+          }}>
+            <Search size={12} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+            <input
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Filter chats…"
+              style={{
+                flex: 1, border: 'none', background: 'transparent',
+                fontSize: 'var(--text-sm)', color: 'var(--text-primary)',
+                fontFamily: 'var(--font-sans)', outline: 'none',
+              }}
+            />
+            {searchQuery && (
+              <button onClick={() => setSearchQuery('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}>
+                <X size={12} />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* ── New Chat ── */}
+        <button className="sidebar-new-btn" onClick={onNewChat} aria-label="New chat">
+          <Plus size={14} />
+          New chat
+        </button>
+
+        {/* ── Active Document ── */}
+        {activeDocument && (
+          <div className="sidebar-doc-badge">
+            <div className="sidebar-doc-dot" />
+            <FileText size={12} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 'var(--text-2xs)', fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                Active
               </div>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                RAG Assistant
+              <div className="truncate" style={{ fontSize: 'var(--text-xs)', fontWeight: 500, color: 'var(--text-primary)' }}>
+                {activeDocument}
               </div>
             </div>
           </div>
+        )}
 
-          {/* Collapse button (mobile) */}
-          <button
-            onClick={onClose}
-            className="md:hidden btn btn-ghost"
-            style={{ padding: '6px', borderRadius: '8px' }}
-            aria-label="Close sidebar"
-          >
-            <ChevronLeft size={18} />
-          </button>
-        </div>
-
-        {/* ── New Chat button ── */}
-        <div style={{ padding: '14px 12px 10px' }}>
-          <button
-            onClick={onNewChat}
-            className="btn btn-primary"
-            style={{ width: '100%', justifyContent: 'center', padding: '10px 16px', borderRadius: '12px', fontSize: '13.5px' }}
-          >
-            <Plus size={16} />
-            New Chat
-          </button>
-        </div>
-
-        {/* ── Conversations list ── */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '4px 12px' }}>
+        {/* ── Conversations ── */}
+        <div className="sidebar-scroll">
           {conversations.length === 0 ? (
-            <div style={{
-              textAlign: 'center', padding: '32px 16px',
-              color: 'var(--text-muted)', fontSize: '13px',
-            }}>
-              <MessageSquare size={28} style={{ margin: '0 auto 8px', opacity: 0.4 }} />
-              <p>No conversations yet.</p>
-              <p style={{ marginTop: '4px', fontSize: '12px' }}>Start a new chat above.</p>
+            <div className="empty-state" style={{ padding: 'var(--sp-8) var(--sp-4)' }}>
+              <MessageSquare size={24} style={{ opacity: 0.3 }} />
+              <div className="empty-state-title">No conversations yet</div>
+              <div className="empty-state-desc">Start a new chat to begin exploring your documents.</div>
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="empty-state" style={{ padding: 'var(--sp-6) var(--sp-4)' }}>
+              <Search size={20} style={{ opacity: 0.3 }} />
+              <div className="empty-state-desc">No conversations match your search.</div>
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-              {conversations.map((conv) => (
-                <div
-                  key={conv.id}
-                  onClick={() => { onSwitchChat(conv.id); onClose(); }}
-                  className={`sidebar-item ${conv.id === activeId ? 'active' : ''}`}
-                  style={{ position: 'relative', cursor: 'pointer', paddingRight: '8px' }}
-                >
-                  <MessageSquare size={15} style={{ flexShrink: 0, opacity: 0.7 }} />
-
-                  {editingId === conv.id ? (
-                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '4px' }}
-                      onClick={(e) => e.stopPropagation()}>
-                      <input
-                        ref={editRef}
-                        value={editTitle}
-                        onChange={(e) => setEditTitle(e.target.value)}
-                        onKeyDown={(e) => handleRenameKey(e, conv.id)}
-                        style={{
-                          flex: 1, border: '1px solid var(--primary)',
-                          borderRadius: '6px', padding: '2px 6px',
-                          fontSize: '13px', background: 'var(--surface)',
-                          color: 'var(--text-primary)', outline: 'none',
-                        }}
-                      />
-                      <button onClick={() => commitRename(conv.id)}
-                        style={{ color: 'var(--primary)', padding: '2px', background: 'none', border: 'none', cursor: 'pointer' }}>
-                        <Check size={14} />
-                      </button>
-                      <button onClick={() => setEditingId(null)}
-                        style={{ color: 'var(--text-muted)', padding: '2px', background: 'none', border: 'none', cursor: 'pointer' }}>
-                        <X size={14} />
-                      </button>
-                    </div>
-                  ) : (
-                    <>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{
-                          fontSize: '13.5px', fontWeight: 500,
-                          color: conv.id === activeId ? 'var(--primary)' : 'var(--text-primary)',
-                          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                        }}>
-                          {conv.title}
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
-                          <Clock size={10} style={{ color: 'var(--text-muted)' }} />
-                          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                            {formatTime(conv.createdAt)}
-                          </span>
-                          {conv.documentName && (
-                            <span style={{
-                              fontSize: '10.5px', color: 'var(--text-muted)',
-                              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                              maxWidth: '80px',
-                            }}>
-                              · {conv.documentName}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Action icons (visible on hover) */}
-                      <div
-                        className="conv-actions"
-                        style={{ display: 'flex', gap: '2px', opacity: 0, transition: 'opacity 0.15s' }}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <button onClick={(e) => startRename(e, conv)}
-                          style={{
-                            background: 'none', border: 'none', cursor: 'pointer',
-                            color: 'var(--text-muted)', padding: '4px', borderRadius: '5px',
-                          }}
-                          onMouseOver={(e) => e.currentTarget.style.color = 'var(--text-primary)'}
-                          onMouseOut={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
-                          title="Rename"
-                        >
-                          <Pencil size={13} />
-                        </button>
-                        <button onClick={(e) => { e.stopPropagation(); onDeleteChat(conv.id); }}
-                          style={{
-                            background: 'none', border: 'none', cursor: 'pointer',
-                            color: 'var(--text-muted)', padding: '4px', borderRadius: '5px',
-                          }}
-                          onMouseOver={(e) => e.currentTarget.style.color = '#EF4444'}
-                          onMouseOut={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
-                          title="Delete"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    </>
-                  )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
+              {groups.map(group => (
+                <div key={group.label}>
+                  <div className="sidebar-section-label">{group.label}</div>
+                  {group.items.map(conv => <ConvItem key={conv.id} conv={conv} />)}
                 </div>
               ))}
             </div>
           )}
         </div>
 
-        {/* ── Active document chip ── */}
-        {activeDocument && (
-          <div style={{ padding: '8px 12px' }}>
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: '8px',
-              padding: '10px 12px', borderRadius: '10px',
-              background: 'var(--sidebar-active)',
-              border: '1px solid rgba(37,99,235,0.15)',
-            }}>
-              <FileText size={14} style={{ color: 'var(--primary)', flexShrink: 0 }} />
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: '10.5px', fontWeight: 600, color: 'var(--primary)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-                  Active Document
-                </div>
-                <div style={{
-                  fontSize: '12.5px', fontWeight: 500, color: 'var(--text-primary)',
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>
-                  {activeDocument}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ── Bottom actions ── */}
-        <div style={{
-          padding: '12px', borderTop: '1px solid var(--sidebar-border)',
-          display: 'flex', alignItems: 'center', gap: '8px',
-        }}>
-          <button
-            onClick={onToggleTheme}
-            className="btn btn-ghost"
-            style={{ flex: 1, justifyContent: 'center', gap: '8px', padding: '9px' }}
-            title="Toggle theme"
-          >
-            {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
-            <span style={{ fontSize: '13px' }}>{theme === 'dark' ? 'Light' : 'Dark'} mode</span>
+        {/* ── Footer ── */}
+        <div className="sidebar-footer">
+          <button className="sidebar-footer-btn" onClick={onToggleTheme} title="Toggle theme">
+            {theme === 'dark' ? <Sun size={14} style={{ color: 'var(--text-muted)' }} /> : <Moon size={14} style={{ color: 'var(--text-muted)' }} />}
+            {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+          </button>
+          <button className="sidebar-footer-btn" onClick={onOpenShortcuts} title="Keyboard shortcuts">
+            <Keyboard size={14} style={{ color: 'var(--text-muted)' }} />
+            Keyboard shortcuts
+            <span style={{ marginLeft: 'auto' }} className="hint-badge">?</span>
           </button>
         </div>
       </aside>
-
-      {/* Inline style to show conv-actions on hover */}
-      <style>{`
-        .sidebar-item:hover .conv-actions { opacity: 1 !important; }
-      `}</style>
     </>
   );
 }

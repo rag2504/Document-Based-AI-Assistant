@@ -1,187 +1,262 @@
-import React, { useState } from 'react';
-import ReactMarkdown from 'react-markdown';
+import React, { useState, useCallback } from 'react';
 import remarkGfm from 'remark-gfm';
-import { Copy, Check, ThumbsUp, ThumbsDown, RefreshCw, User } from 'lucide-react';
-import SourcePanel from './SourcePanel';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Copy, Check, ThumbsUp, ThumbsDown, RefreshCw, ChevronDown, ChevronUp, BookOpen } from 'lucide-react';
+import PresentationEngine from './PresentationEngine';
 
-export default function MessageBubble({ message, onRegenerate, isStreaming }) {
-  const { role, content, sources, timestamp } = message;
-  const isUser = role === 'user';
+// ── Code block with copy button ──────────────────────────────────────────────
+function CodeBlock({ lang, code }) {
   const [copied, setCopied] = useState(false);
-  const [reaction, setReaction] = useState(null); // 'up' | 'down'
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(content).catch(() => {});
+    navigator.clipboard.writeText(code).catch(() => {});
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const formatTime = (iso) => {
-    try {
-      return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    } catch {
-      return '';
-    }
+  return (
+    <div className="code-block">
+      <div className="code-block-bar">
+        <span className="code-lang">{lang || 'code'}</span>
+        <button
+          className={`code-copy-btn ${copied ? 'copied' : ''}`}
+          onClick={handleCopy}
+          title="Copy code"
+        >
+          {copied ? <Check size={11} /> : <Copy size={11} />}
+          {copied ? 'Copied!' : 'Copy'}
+        </button>
+      </div>
+      <pre><code>{code}</code></pre>
+    </div>
+  );
+}
+
+// ── Source citations panel ────────────────────────────────────────────────────
+function SourcesPanel({ sources, onCitationHover }) {
+  const [open, setOpen] = useState(false);
+  const [expandedIdx, setExpandedIdx] = useState(null);
+
+  if (!sources || sources.length === 0) return null;
+
+  const shortId = (id) => {
+    if (!id) return '—';
+    const parts = id.split('_');
+    return parts.length > 1 ? `#${parts[parts.length - 1]}` : id.slice(-4);
   };
 
+  return (
+    <div className="sources-section">
+      <button
+        className="sources-toggle"
+        onClick={() => setOpen(v => !v)}
+        aria-expanded={open}
+      >
+        <BookOpen size={12} />
+        <span>{sources.length} source reference{sources.length !== 1 ? 's' : ''}</span>
+        {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+      </button>
+
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            className="source-cards"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 35 }}
+            style={{ overflow: 'hidden' }}
+          >
+            {sources.map((src, i) => {
+              const isExpanded = expandedIdx === i;
+              return (
+                <div
+                  key={src.chunk_id || i}
+                  className={`source-card ${isExpanded ? 'expanded' : ''}`}
+                  onClick={() => setExpandedIdx(isExpanded ? null : i)}
+                  onMouseEnter={() => onCitationHover && onCitationHover(src.chunk_id)}
+                  onMouseLeave={() => onCitationHover && onCitationHover(null)}
+                >
+                  <div className="source-card-header">
+                    <div className="source-card-meta">
+                      <div className="source-index">{i + 1}</div>
+                      <span className="source-label">Source {i + 1}</span>
+                      {src.page != null && (
+                        <span className="source-page-badge">
+                          Page {src.page}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 'var(--text-2xs)', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                        {shortId(src.chunk_id)}
+                      </span>
+                      {isExpanded ? <ChevronUp size={13} style={{ color: 'var(--text-muted)' }} /> : <ChevronDown size={13} style={{ color: 'var(--text-muted)' }} />}
+                    </div>
+                  </div>
+
+                  <AnimatePresence initial={false}>
+                    {isExpanded && src.text && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ type: 'spring', stiffness: 400, damping: 35 }}
+                        style={{ overflow: 'hidden' }}
+                      >
+                        <p className="source-snippet">
+                          "{src.text.length > 450 ? src.text.slice(0, 450) + '…' : src.text}"
+                        </p>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              );
+            })}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// ── Main MessageBubble ────────────────────────────────────────────────────────
+export default function MessageBubble({ message, onRegenerate, isStreaming, onCitationHover }) {
+  const { role, content, sources, timestamp } = message;
+  const isUser = role === 'user';
+  const [copied, setCopied] = useState(false);
+  const [reaction, setReaction] = useState(null);
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(content).catch(() => {});
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }, [content]);
+
+  const formatTime = (iso) => {
+    try { return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+    catch { return ''; }
+  };
+
+  // ── User bubble ──
   if (isUser) {
     return (
-      <div style={{
-        display: 'flex', justifyContent: 'flex-end',
-        alignItems: 'flex-end', gap: '10px',
-      }}>
-        <div style={{ maxWidth: '80%' }}>
-          <div style={{ textAlign: 'right', marginBottom: '4px' }}>
-            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-              {formatTime(timestamp)}
-            </span>
-          </div>
-          <div className="user-bubble">
-            <p style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-              {content}
-            </p>
-          </div>
+      <motion.div
+        className="msg-user"
+        initial={{ opacity: 0, x: 16 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ type: 'spring', stiffness: 500, damping: 40 }}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, maxWidth: '75%' }}>
+          <div className="msg-user-bubble">{content}</div>
+          <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>{formatTime(timestamp)}</span>
         </div>
-        <div style={{
-          width: '32px', height: '32px', borderRadius: '10px',
-          background: 'linear-gradient(135deg, #2563EB, #3B82F6)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          flexShrink: 0, boxShadow: '0 2px 8px rgba(37,99,235,0.25)',
-        }}>
-          <User size={16} color="white" />
-        </div>
-      </div>
+      </motion.div>
     );
   }
 
+  // ── Assistant message ──
   return (
-    <div className="ai-message-wrapper" style={{
-      display: 'flex', alignItems: 'flex-start', gap: '10px',
-    }}>
-      <div style={{
-        width: '32px', height: '32px', borderRadius: '10px',
-        background: 'var(--surface)',
-        border: '1px solid var(--border)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        flexShrink: 0, boxShadow: 'var(--shadow-xs)',
-        fontSize: '16px', lineHeight: 1,
-      }}>
-        ?
+    <motion.div
+      className="msg-assistant"
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ type: 'spring', stiffness: 400, damping: 35 }}
+    >
+      {/* Avatar + name */}
+      <div className="msg-assistant-header">
+        <div className="msg-ai-avatar">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+          </svg>
+        </div>
+        <span className="msg-ai-name">Omnidoc</span>
+        <span className="msg-ai-time">{formatTime(timestamp)}</span>
       </div>
 
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '6px' }}>
-          <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
-            DocAI
-          </span>
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-            {formatTime(timestamp)}
-          </span>
-        </div>
+      {/* Content */}
+      <div className={`msg-ai-content ${isStreaming && !content ? '' : ''}`}>
+        {content ? (
+          <div className={`prose ${isStreaming ? 'streaming-cursor' : ''}`}>
+            <PresentationEngine
+              content={content}
+              remarkPlugins={[remarkGfm]}
+              components={{
+                code({ node, inline, className, children, ...props }) {
+                  if (inline) {
+                    return <code {...props}>{children}</code>;
+                  }
+                  const lang = (className || '').replace('language-', '');
+                  const code = String(children).replace(/\n$/, '');
+                  return <CodeBlock lang={lang} code={code} />;
+                },
+                pre({ children }) {
+                  return <>{children}</>;
+                },
+                table({ children }) {
+                  return <div className="prose-table-wrap"><table>{children}</table></div>;
+                },
+                li({ children, className, ...props }) {
+                  const isTask = className === 'task-list-item';
+                  return <li className={isTask ? 'task-list-item' : ''} {...props}>{children}</li>;
+                },
+                blockquote({ children }) {
+                  return <blockquote>{children}</blockquote>;
+                },
+              }}
+            />
+          </div>
+        ) : isStreaming ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 0' }}>
+            <span className="typing-dot" />
+            <span className="typing-dot" />
+            <span className="typing-dot" />
+          </div>
+        ) : null}
+      </div>
 
-        <div className={`ai-card ${isStreaming ? 'streaming-cursor' : ''}`}>
-          {content ? (
-            <div className="prose-content">
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={{
-                  code({ node, inline, className, children, ...props }) {
-                    if (inline) {
-                      return <code className="inline-code" {...props}>{children}</code>;
-                    }
-                    const lang = (className || '').replace('language-', '');
-                    return (
-                      <div className="code-block-wrapper">
-                        {lang && (
-                          <div className="code-block-header">
-                            <span className="code-lang-label">{lang}</span>
-                          </div>
-                        )}
-                        <pre style={{ margin: 0 }}>
-                          <code {...props}>{children}</code>
-                        </pre>
-                      </div>
-                    );
-                  },
-                  table({ children }) {
-                    return (
-                      <div className="prose-table-wrapper">
-                        <table>{children}</table>
-                      </div>
-                    );
-                  },
-                  li({ children, className, ...props }) {
-                    const isTask = className === 'task-list-item';
-                    if (isTask) {
-                      return <li className="task-list-item" {...props}>{children}</li>;
-                    }
-                    return <li {...props}>{children}</li>;
-                  },
-                  blockquote({ children }) {
-                    return <blockquote className="prose-blockquote">{children}</blockquote>;
-                  },
-                  h1({ children }) {
-                    return <h1 className="prose-h1">{children}</h1>;
-                  },
-                  h2({ children }) {
-                    return <h2 className="prose-h2">{children}</h2>;
-                  },
-                  h3({ children }) {
-                    return <h3 className="prose-h3">{children}</h3>;
-                  },
-                  hr() {
-                    return <hr className="prose-hr" />;
-                  },
-                }}
-              >
-                {content}
-              </ReactMarkdown>
-            </div>
-          ) : (
-            isStreaming && (
-              <div style={{ height: '20px' }} />
-            )
+      {/* Sources */}
+      {!isStreaming && sources && sources.length > 0 && (
+        <SourcesPanel sources={sources} onCitationHover={onCitationHover} />
+      )}
+
+      {/* Actions */}
+      {content && !isStreaming && (
+        <div className="msg-actions">
+          <button
+            className={`msg-action-btn ${copied ? 'active' : ''}`}
+            onClick={handleCopy}
+            title="Copy response"
+          >
+            {copied ? <Check size={12} /> : <Copy size={12} />}
+            <span>{copied ? 'Copied' : 'Copy'}</span>
+          </button>
+
+          <button
+            className={`msg-action-btn ${reaction === 'up' ? 'active' : ''}`}
+            onClick={() => setReaction(r => r === 'up' ? null : 'up')}
+            title="Good response"
+          >
+            <ThumbsUp size={12} />
+          </button>
+
+          <button
+            className={`msg-action-btn ${reaction === 'down' ? 'active' : ''}`}
+            onClick={() => setReaction(r => r === 'down' ? null : 'down')}
+            title="Poor response"
+            style={reaction === 'down' ? { background: 'var(--error-subtle)', color: 'var(--error)', borderColor: 'transparent' } : {}}
+          >
+            <ThumbsDown size={12} />
+          </button>
+
+          {onRegenerate && (
+            <button className="msg-action-btn" onClick={onRegenerate} title="Regenerate response">
+              <RefreshCw size={12} />
+              <span>Retry</span>
+            </button>
           )}
         </div>
-
-        {sources && sources.length > 0 && !isStreaming && (
-          <SourcePanel sources={sources} />
-        )}
-
-        {content && !isStreaming && (
-          <div className="msg-actions">
-            <button onClick={handleCopy} className="msg-action-btn" title="Copy response">
-              {copied ? (
-                <><Check size={13} style={{ color: '#10B981' }} /><span style={{ color: '#10B981' }}>Copied</span></>
-              ) : (
-                <><Copy size={13} /><span>Copy</span></>
-              )}
-            </button>
-            <button
-              onClick={() => setReaction(reaction === 'up' ? null : 'up')}
-              className="msg-action-btn"
-              title="Good response"
-              style={reaction === 'up' ? { color: '#10B981', borderColor: '#10B981', background: '#F0FDF4' } : {}}
-            >
-              <ThumbsUp size={13} />
-            </button>
-            <button
-              onClick={() => setReaction(reaction === 'down' ? null : 'down')}
-              className="msg-action-btn"
-              title="Bad response"
-              style={reaction === 'down' ? { color: '#EF4444', borderColor: '#EF4444', background: '#FEF2F2' } : {}}
-            >
-              <ThumbsDown size={13} />
-            </button>
-            {onRegenerate && (
-              <button onClick={onRegenerate} className="msg-action-btn" title="Regenerate">
-                <RefreshCw size={13} />
-                <span>Regenerate</span>
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
+      )}
+    </motion.div>
   );
 }
