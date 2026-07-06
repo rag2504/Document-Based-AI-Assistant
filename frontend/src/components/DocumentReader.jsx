@@ -16,38 +16,29 @@ export default function DocumentReader({ filename, hoveredCitationId, activeId }
   const [error, setError] = useState(null);
   const chunkRefs = useRef({});
 
-  // Fetch document chunks from the backend (Supabase database via active filename)
+  // Fetch document chunks from the backend
   useEffect(() => {
     async function fetchChunks() {
       if (!filename) return;
       setLoading(true);
       setError(null);
       try {
-        const response = await axios.get(`${API_BASE}/session/data`, {
+        const response = await axios.get(`${API_BASE}/document/chunks`, {
+          params: { filename },
           headers: { 'x-session-id': getSessionId() }
         });
+        
         if (response.data.success) {
-          // Find document chunks for the active filename
-          const doc = response.data.documents.find(d => d.filename === filename);
-          if (doc) {
-            // Find chunks for this document
-            const vsResponse = await axios.get(`${API_BASE}/readiness`); // standard check
-            // Fallback: Mock mock readable text split into pages if direct endpoint doesn't exist
-            // Wait, does the backend have a get_chunks route? No, but let's check vector_store schema.
-            // Oh, we can fetch all conversations, but there's no direct route to fetch all raw chunks of a document.
-            // Wait! Can we get the chunks from the first welcome upload, or simulate them?
-            // Actually, we can fetch chunks by mapping them, or since the text chunks are processed during upload,
-            // we can retrieve them or parse them.
-            // Let's check vector_store.py or database schema if there's an endpoint to get chunks.
-            // In app.py there is no GET /chunks endpoint!
-            // But wait, we can add a lightweight route to GET /document/chunks?filename=XYZ, or we can mock/simulate pages from standard document session data.
-            // Wait, we CAN write a lightweight endpoint in backend/app.py to return document chunks!
-            // That would be a robust, premium addition. Let's see if we should.
-            // Yes! Adding a route `@app.get("/document/chunks")` in `app.py` is super simple and makes RAG feel completely authentic!
-          }
+          const formattedChunks = response.data.chunks.map(c => ({
+            id: c.chunk_id,
+            page: c.page_number,
+            text: c.content
+          }));
+          setChunks(formattedChunks);
         }
       } catch (err) {
         console.error('Failed to load chunks', err);
+        setError('Could not load document data');
       } finally {
         setLoading(false);
       }
@@ -65,7 +56,7 @@ export default function DocumentReader({ filename, hoveredCitationId, activeId }
     }
   }, [hoveredCitationId]);
 
-  // For demonstration, if no chunks are fetched yet, we split a beautiful placeholder manuscript
+  // Fallback placeholder if no chunks are fetched
   const renderChunks = chunks.length > 0 ? chunks : [
     { id: 'chunk_1', page: 1, text: 'This document outline represents the primary structural nodes of your uploaded intelligence asset. RAG scans this information to construct grounded answers.' },
     { id: 'chunk_2', page: 1, text: 'Section 1: Conceptual Architecture. The system uses a bi-directional reference map connecting the document canvas on the left to the LLM workspace on the right.' },

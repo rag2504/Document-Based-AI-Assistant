@@ -298,6 +298,45 @@ def get_session_data(x_session_id: str = Header(None)):
         "conversations": conversations
     }
 
+# ── Document Chunks ────────────────────────────────────────────────────────────
+@app.get("/document/chunks")
+def get_document_chunks(filename: str, x_session_id: str = Header(None)):
+    """
+    Fetches all chunks for a specific document to display in the Document Reader.
+    """
+    if not x_session_id:
+        raise HTTPException(status_code=400, detail="Missing x-session-id header")
+    if not filename:
+        raise HTTPException(status_code=400, detail="Missing filename parameter")
+        
+    vs = get_vector_store()
+    
+    # Verify document belongs to session
+    doc_res = vs.client.table("documents").select("id").eq("filename", filename).eq("session_id", x_session_id).execute()
+    if not doc_res.data:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    doc_id = doc_res.data[0]["id"]
+    
+    # Fetch chunks, exclude embedding vector
+    chunks_res = vs.client.table("document_chunks").select("chunk_id, page_number, content").eq("document_id", doc_id).execute()
+    
+    chunks_data = chunks_res.data
+    # Sort chunks numerically based on their ID suffix (e.g., filename_chunk_1)
+    def get_chunk_num(c):
+        try:
+            return int(c["chunk_id"].split("_chunk_")[-1])
+        except:
+            return 0
+    
+    chunks_data.sort(key=get_chunk_num)
+    
+    return {
+        "success": True,
+        "filename": filename,
+        "chunks": chunks_data
+    }
+
 # ── Upload ─────────────────────────────────────────────────────────────────────
 @app.post("/upload")
 async def upload_document(file: UploadFile = File(...), x_session_id: str = Header(None)):
