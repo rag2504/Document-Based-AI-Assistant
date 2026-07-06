@@ -8,7 +8,7 @@ import ChatInput from './components/ChatInput';
 import { useTheme } from './hooks/useTheme';
 import { useConversations } from './hooks/useConversations';
 
-const API_BASE = 'http://localhost:8000';
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 function generateId() {
   return Math.random().toString(36).substring(2, 10);
