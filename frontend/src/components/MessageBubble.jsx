@@ -3,6 +3,7 @@ import remarkGfm from 'remark-gfm';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Copy, Check, ThumbsUp, ThumbsDown, RefreshCw, ChevronDown, ChevronUp, BookOpen } from 'lucide-react';
 import PresentationEngine from './PresentationEngine';
+import { OmnidocLogo } from './Sidebar';
 
 // ── Code block with copy button ──────────────────────────────────────────────
 function CodeBlock({ lang, code }) {
@@ -147,10 +148,8 @@ export default function MessageBubble({ message, onRegenerate, isStreaming, onCi
         animate={{ opacity: 1, x: 0 }}
         transition={{ type: 'spring', stiffness: 500, damping: 40 }}
       >
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-          <div className="msg-user-bubble">{content}</div>
-          <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>{formatTime(timestamp)}</span>
-        </div>
+        <div className="msg-user-bubble">{content}</div>
+        <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>{formatTime(timestamp)}</span>
       </motion.div>
     );
   }
@@ -166,9 +165,7 @@ export default function MessageBubble({ message, onRegenerate, isStreaming, onCi
       {/* Avatar + name */}
       <div className="msg-assistant-header">
         <div className="msg-ai-avatar">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
-          </svg>
+          <OmnidocLogo size={24} />
         </div>
         <span className="msg-ai-name">Omnidoc</span>
         <span className="msg-ai-time">{formatTime(timestamp)}</span>
