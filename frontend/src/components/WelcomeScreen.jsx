@@ -128,6 +128,9 @@ export default function WelcomeScreen({
             exit={{ opacity: 0, y: -8 }}
             transition={{ type: 'spring', stiffness: 300, damping: 25 }}
           >
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 'var(--sp-4)' }}>
+              <img src="/logo.jpeg" alt="Omnidoc" style={{ width: 56, height: 56, borderRadius: 12, objectFit: 'cover', boxShadow: '0 2px 16px rgba(0,0,0,0.12)' }} />
+            </div>
             <div style={{
               display: 'inline-flex', alignItems: 'center', gap: 6,
               background: 'var(--accent-subtle)', border: '1px solid var(--accent-light)',

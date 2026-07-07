@@ -6,33 +6,15 @@ import {
   Search, Pin, PinOff, Keyboard, Zap, Lock, Upload
 } from 'lucide-react';
 
-/* ── Custom Omnidoc Logo ── */
+/* ── Omnidoc Logo ── */
 export const OmnidocLogo = ({ size = 28 }) => (
-  <svg width={size} height={size} viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <linearGradient id="logoGrad1" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0%" stopColor="#818CF8" />
-        <stop offset="100%" stopColor="#4F46E5" />
-      </linearGradient>
-      <linearGradient id="logoGrad2" x1="1" y1="0" x2="0" y2="1">
-        <stop offset="0%" stopColor="#6366F1" />
-        <stop offset="100%" stopColor="#3730A3" />
-      </linearGradient>
-    </defs>
-    <g transform="translate(50, 50)">
-      {[0, 90, 180, 270].map((angle, i) => (
-        <path
-          key={i}
-          transform={`rotate(${angle})`}
-          d="M 5,-30 L 15,-30 C 25,-30 30,-25 30,-15 L 30,5 C 30,12 25,18 18,18 L -5,18"
-          stroke={i % 2 === 0 ? "url(#logoGrad1)" : "url(#logoGrad2)"}
-          strokeWidth="10"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      ))}
-    </g>
-  </svg>
+  <img
+    src="/logo.jpeg"
+    alt="Omnidoc logo"
+    width={size}
+    height={size}
+    style={{ borderRadius: '6px', objectFit: 'cover', display: 'block' }}
+  />
 );
 
 export default function Sidebar({
