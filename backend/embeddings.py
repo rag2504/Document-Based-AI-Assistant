@@ -1,11 +1,11 @@
-import os
 import logging
 from typing import List
-from sentence_transformers import SentenceTransformer
+from fastembed import TextEmbedding
 
 logger = logging.getLogger(__name__)
 
-EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+# BAAI/bge-small-en-v1.5 — 384 dims, ~25MB, no torch/CUDA needed
+EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 
 
 class EmbeddingModel:
@@ -14,19 +14,19 @@ class EmbeddingModel:
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             instance = super(EmbeddingModel, cls).__new__(cls)
-            logger.info(f"Loading local SentenceTransformer model '{EMBEDDING_MODEL}' (384 dimensions) ...")
-            instance.model = SentenceTransformer(EMBEDDING_MODEL)
-            logger.info("Local SentenceTransformer model loaded successfully.")
+            logger.info(f"Loading fastembed model '{EMBEDDING_MODEL}' (~25MB, no torch required) ...")
+            instance.model = TextEmbedding(model_name=EMBEDDING_MODEL)
+            logger.info("Embedding model loaded successfully.")
             cls._instance = instance
         return cls._instance
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        embeddings = self.model.encode(texts, convert_to_numpy=True)
-        return embeddings.tolist()
+        embeddings = list(self.model.embed(texts))
+        return [e.tolist() for e in embeddings]
 
     def embed_query(self, text: str) -> List[float]:
-        embedding = self.model.encode(text, convert_to_numpy=True)
-        return embedding.tolist()
+        embeddings = list(self.model.embed([text]))
+        return embeddings[0].tolist()
 
 
 _embedding_model = None

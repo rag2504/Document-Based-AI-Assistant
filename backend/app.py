@@ -59,7 +59,7 @@ async def lifespan(app: FastAPI):
 
     # 2. Warm-up the embedding model (loads weights into memory once)
     try:
-        logger.info("Loading sentence-transformer embedding model …")
+        logger.info("Loading fastembed embedding model …")
         get_embedding_model()
         logger.info("Embedding model ready.")
     except Exception as e:

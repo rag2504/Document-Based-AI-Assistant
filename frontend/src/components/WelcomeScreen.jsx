@@ -13,7 +13,7 @@ const PIPELINE_STAGES = [
   { label: 'Reading bytes',            desc: 'Loading document stream in-memory' },
   { label: 'Analysing structure',      desc: 'Parsing PDF elements and layout' },
   { label: 'Extracting semantic nodes', desc: 'Building local vector boundaries' },
-  { label: 'Generating embeddings',    desc: 'Processing all-MiniLM-L6-v2 vectors' },
+  { label: 'Generating embeddings',    desc: 'Processing BAAI/bge-small-en-v1.5 vectors' },
   { label: 'Indexing knowledge graph', desc: 'Injecting chunks into pgvector' },
 ];
 
@@ -41,8 +41,8 @@ const FEATURE_CARDS = [
   {
     color: '#f59e0b',
     Icon: ShieldCheck,
-    title: 'Offline Embeddings',
-    desc: 'all-MiniLM-L6-v2 runs locally — private, rate-limit-free vector search.',
+    title: 'Lightweight Embeddings',
+    desc: 'FastEmbed BGE-small runs with ~25MB memory footprint — fast, efficient, no CUDA.',
   },
 ];
 
