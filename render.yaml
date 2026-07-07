@@ -30,7 +30,7 @@
       # https://docai.vercel.app
       # Multiple URLs comma-separated: https://docai.vercel.app,https://docai-preview.vercel.app
       - key: ALLOWED_ORIGINS
-        value: "*"
+        value: "https://document-based-ai-assistant-p27x.vercel.app,http://localhost:5173"
 
       # Set your real API key in the Render Dashboard (Environment tab)
       - key: GROQ_API_KEY
