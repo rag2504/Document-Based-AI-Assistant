@@ -9,11 +9,11 @@ import {
 /* ── Omnidoc Logo ── */
 export const OmnidocLogo = ({ size = 28 }) => (
   <img
-    src="/logo.jpeg"
+    src="/logo.svg"
     alt="Omnidoc logo"
     width={size}
     height={size}
-    style={{ borderRadius: '6px', objectFit: 'cover', display: 'block' }}
+    style={{ objectFit: 'contain', display: 'block', background: 'transparent', imageRendering: 'auto' }}
   />
 );
 
