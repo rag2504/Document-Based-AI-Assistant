@@ -111,7 +111,7 @@ export default function WelcomeScreen({
   return (
     <div
       className="workspace glowing-grid"
-      style={{ position: 'relative', overflow: 'hidden' }}
+      style={{ position: 'relative', overflowX: 'hidden' }}
     >
       {/* Ambient glow orbs */}
       <div aria-hidden style={{ position: 'absolute', top: '8%', left: '18%', width: 280, height: 280, borderRadius: '50%', background: 'radial-gradient(circle, rgba(94,106,210,0.07) 0%, transparent 70%)', filter: 'blur(40px)', pointerEvents: 'none' }} />

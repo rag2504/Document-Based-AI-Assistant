@@ -312,7 +312,7 @@ body {
 .sidebar-overlay {
   position: fixed;
   inset: 0;
-  z-index: 39;
+  z-index: 38;  /* below sidebar (40) and header (50) */
   background: rgba(0,0,0,0.4);
   backdrop-filter: blur(4px);
   animation: fadeIn var(--dur-base) var(--ease-out);
@@ -338,24 +338,19 @@ body {
 }
 
 .sidebar-logo {
-  width: 28px;
-  height: 28px;
-  border-radius: var(--r-md);
-  background: var(--accent);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  box-shadow: var(--s-accent);
+  /* Background removed as the new SVG is fully colored */
 }
 
-.sidebar-logo svg { color: white; }
-
 .sidebar-brand-text {
-  font-size: var(--text-sm);
-  font-weight: 700;
+  font-size: 18px;
+  font-weight: 800;
   color: var(--text-primary);
   letter-spacing: -0.01em;
+  font-family: var(--font-sans);
 }
 
 /* ── Sidebar search / filter ── */
@@ -596,7 +591,7 @@ body {
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   position: relative;
-  z-index: 20;
+  z-index: 50;  /* above sidebar (40) and sidebar-overlay (39) */
 }
 
 .context-bar-doc {
@@ -738,6 +733,7 @@ body {
   min-width: 0;
   overflow: hidden;
   background: var(--bg);
+  border-left: 1px solid var(--border);
 }
 
 .chat-scroll {
@@ -765,6 +761,7 @@ body {
 
 .msg-user-bubble {
   max-width: 72%;
+  min-width: 60px;
   background: var(--accent);
   color: white;
   border-radius: var(--r-xl) var(--r-xl) var(--r-xs) var(--r-xl);
@@ -772,6 +769,7 @@ body {
   font-size: var(--text-base);
   line-height: var(--leading-relaxed);
   word-break: break-word;
+  white-space: pre-wrap;
   box-shadow: var(--s-accent);
   animation: slideInRight var(--dur-slow) var(--ease-out) both;
 }
@@ -1058,6 +1056,7 @@ body {
   /* 16px top · 16px sides · 20px bottom — safe area for visual breathing */
   padding: var(--sp-4) var(--col-pad) var(--sp-5);
   background: var(--bg);
+  border-top: 1px solid var(--border);
 }
 
 .input-container {

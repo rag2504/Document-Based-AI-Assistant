@@ -1,6 +1,49 @@
 import React from 'react';
-import { motion } from 'framer-motion';
-import { Menu, FileText, Plus, Trash2, Download, Moon, Sun, AlignLeft } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { FileText, Download, Moon, Sun } from 'lucide-react';
+
+/* ── Animated Hamburger / X icon ── */
+function HamburgerIcon({ isOpen }) {
+  const line = {
+    open:   { transition: { duration: 0.3, ease: [0.4, 0, 0.2, 1] } },
+    closed: { transition: { duration: 0.3, ease: [0.4, 0, 0.2, 1] } },
+  };
+
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 18 18"
+      fill="none"
+      aria-hidden="true"
+      style={{ display: 'block', overflow: 'visible' }}
+    >
+      {/* Top line → becomes top arm of X */}
+      <motion.path
+        stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"
+        initial={false}
+        animate={{ d: isOpen ? "M 3 3 L 15 15" : "M 2 4.5 L 16 4.5" }}
+        transition={{ duration: 0.28, ease: [0.4, 0, 0.2, 1] }}
+      />
+      {/* Middle line → fades out */}
+      <motion.path
+        d="M 2 9 L 16 9"
+        stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"
+        initial={false}
+        animate={{ opacity: isOpen ? 0 : 1, pathLength: isOpen ? 0 : 1 }}
+        style={{ transformOrigin: '50% 50%' }}
+        transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
+      />
+      {/* Bottom line → becomes bottom arm of X */}
+      <motion.path
+        stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"
+        initial={false}
+        animate={{ d: isOpen ? "M 3 15 L 15 3" : "M 2 13.5 L 16 13.5" }}
+        transition={{ duration: 0.28, ease: [0.4, 0, 0.2, 1] }}
+      />
+    </svg>
+  );
+}
 
 export default function Header({
   onToggleSidebar,
@@ -14,17 +57,19 @@ export default function Header({
   sidebarOpen,
 }) {
   return (
-    <header className="context-bar" role="banner">
-      {/* ── Sidebar toggle ── */}
-      <button
+    <header className="context-bar" role="banner" style={{ position: 'relative', zIndex: 50 }}>
+      {/* ── Sidebar toggle with animated hamburger ── */}
+      <motion.button
         className="icon-btn"
         onClick={onToggleSidebar}
         aria-label={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
         title={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
-        style={{ color: 'var(--text-secondary)' }}
+        style={{ color: 'var(--text-secondary)', position: 'relative', zIndex: 51 }}
+        whileTap={{ scale: 0.88 }}
+        transition={{ duration: 0.12 }}
       >
-        <Menu size={18} />
-      </button>
+        <HamburgerIcon isOpen={sidebarOpen} />
+      </motion.button>
 
       {/* ── Active document pill ── */}
       <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
@@ -73,28 +118,6 @@ export default function Header({
             <Download size={16} />
           </button>
         )}
-
-        {hasMessages && (
-          <button
-            className="icon-btn"
-            onClick={onClearChat}
-            title="Clear chat"
-            aria-label="Clear chat"
-            style={{ color: 'var(--text-muted)' }}
-          >
-            <Trash2 size={16} />
-          </button>
-        )}
-
-        <button
-          className="btn btn-primary"
-          onClick={onNewChat}
-          aria-label="New chat"
-          style={{ fontSize: 'var(--text-xs)', height: 32, padding: '0 12px' }}
-        >
-          <Plus size={14} />
-          <span className="hide-sm">New chat</span>
-        </button>
       </div>
 
       <style>{`

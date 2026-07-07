@@ -3,8 +3,37 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plus, MessageSquare, Trash2, Pencil, Check, X,
   FileText, ChevronLeft, Settings, Moon, Sun,
-  Search, Pin, PinOff, Keyboard, Zap
+  Search, Pin, PinOff, Keyboard, Zap, Lock, Upload
 } from 'lucide-react';
+
+/* ── Custom Omnidoc Logo ── */
+const OmnidocLogo = ({ size = 28 }) => (
+  <svg width={size} height={size} viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="logoGrad1" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stopColor="#818CF8" />
+        <stop offset="100%" stopColor="#4F46E5" />
+      </linearGradient>
+      <linearGradient id="logoGrad2" x1="1" y1="0" x2="0" y2="1">
+        <stop offset="0%" stopColor="#6366F1" />
+        <stop offset="100%" stopColor="#3730A3" />
+      </linearGradient>
+    </defs>
+    <g transform="translate(50, 50)">
+      {[0, 90, 180, 270].map((angle, i) => (
+        <path
+          key={i}
+          transform={`rotate(${angle})`}
+          d="M 5,-30 L 15,-30 C 25,-30 30,-25 30,-15 L 30,5 C 30,12 25,18 18,18 L -5,18"
+          stroke={i % 2 === 0 ? "url(#logoGrad1)" : "url(#logoGrad2)"}
+          strokeWidth="10"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      ))}
+    </g>
+  </svg>
+);
 
 export default function Sidebar({
   isOpen,
@@ -26,11 +55,28 @@ export default function Sidebar({
   const [editingId, setEditingId] = useState(null);
   const [editTitle, setEditTitle] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [showUploadTip, setShowUploadTip] = useState(false);
   const editRef = useRef(null);
+  const tipTimeoutRef = useRef(null);
 
   useEffect(() => {
     if (editingId && editRef.current) editRef.current.focus();
   }, [editingId]);
+
+  // Clear tooltip timer on unmount
+  useEffect(() => () => clearTimeout(tipTimeoutRef.current), []);
+
+  const handleNewChat = () => {
+    if (!activeDocument) {
+      setShowUploadTip(true);
+      clearTimeout(tipTimeoutRef.current);
+      tipTimeoutRef.current = setTimeout(() => setShowUploadTip(false), 3000);
+      return;
+    }
+    setShowUploadTip(false);
+    onNewChat();
+    if (isMobile) onClose();
+  };
 
   const startRename = useCallback((e, conv) => {
     e.stopPropagation();
@@ -173,21 +219,16 @@ export default function Sidebar({
 
       <aside className={sidebarClasses} aria-label="Navigation sidebar">
         {/* ── Header ── */}
-        <div className="sidebar-header">
-          <div className="sidebar-brand">
-            <div className="sidebar-logo">
-              <Zap size={14} />
+        <div className="sidebar-header" style={{ padding: 'var(--sp-2) var(--col-pad)', height: 'auto', minHeight: 'var(--header-h)' }}>
+          <div className="sidebar-brand" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <OmnidocLogo size={36} />
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span className="sidebar-brand-text" style={{ fontSize: '20px', lineHeight: 1.1 }}>OMNIDOC</span>
+              <span style={{ fontSize: '8px', color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.02em', marginTop: '2px' }}>
+                Document Intelligence Operating System
+              </span>
             </div>
-            <span className="sidebar-brand-text">Omnidoc</span>
           </div>
-          <button
-            className="sidebar-icon-btn"
-            onClick={onClose}
-            aria-label="Collapse sidebar"
-            title="Collapse sidebar"
-          >
-            <ChevronLeft size={16} />
-          </button>
         </div>
 
         {/* ── Search / Command ── */}
@@ -203,38 +244,83 @@ export default function Sidebar({
           </button>
         </div>
 
-        {/* ── Inline search filter ── */}
-        <div style={{ padding: '0 var(--sp-3) var(--sp-1)' }}>
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 'var(--sp-2)',
-            padding: '0 var(--sp-3)', borderRadius: 'var(--r-md)',
-            border: '1px solid var(--border)', background: 'var(--bg)',
-            height: 32,
-          }}>
-            <Search size={12} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
-            <input
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              placeholder="Filter chats…"
-              style={{
-                flex: 1, border: 'none', background: 'transparent',
-                fontSize: 'var(--text-sm)', color: 'var(--text-primary)',
-                fontFamily: 'var(--font-sans)', outline: 'none',
-              }}
-            />
-            {searchQuery && (
-              <button onClick={() => setSearchQuery('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}>
-                <X size={12} />
-              </button>
-            )}
-          </div>
-        </div>
+
 
         {/* ── New Chat ── */}
-        <button className="sidebar-new-btn" onClick={() => { onNewChat(); if (isMobile) onClose(); }} aria-label="New chat">
-          <Plus size={14} />
-          New chat
-        </button>
+        <div style={{ position: 'relative', margin: '0 var(--sp-3) var(--sp-1)' }}>
+          <button
+            className="sidebar-new-btn"
+            onClick={handleNewChat}
+            aria-label="New chat"
+            style={{
+              width: '100%',
+              margin: 0,
+              opacity: activeDocument ? 1 : 0.55,
+              cursor: activeDocument ? 'pointer' : 'not-allowed',
+              borderStyle: activeDocument ? 'solid' : 'dashed',
+            }}
+          >
+            {activeDocument ? <Plus size={14} /> : <Lock size={13} />}
+            New chat
+          </button>
+
+          {/* ── Upload tooltip ── */}
+          <AnimatePresence>
+            {showUploadTip && (
+              <motion.div
+                initial={{ opacity: 0, y: 6, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 4, scale: 0.95 }}
+                transition={{ type: 'spring', stiffness: 420, damping: 26 }}
+                style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 8px)',
+                  left: 0, right: 0,
+                  background: 'var(--surface-raised)',
+                  border: '1px solid var(--accent-light)',
+                  borderRadius: 'var(--r-lg)',
+                  padding: '10px 14px',
+                  boxShadow: 'var(--s-3)',
+                  zIndex: 60,
+                  display: 'flex', alignItems: 'flex-start', gap: 10,
+                }}
+              >
+                {/* Arrow */}
+                <div style={{
+                  position: 'absolute', top: -5, left: 20,
+                  width: 10, height: 10,
+                  background: 'var(--surface-raised)',
+                  border: '1px solid var(--accent-light)',
+                  borderBottom: 'none', borderRight: 'none',
+                  transform: 'rotate(45deg)',
+                }} />
+                <div style={{
+                  width: 30, height: 30, borderRadius: 'var(--r-md)',
+                  background: 'var(--accent-subtle)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  flexShrink: 0,
+                }}>
+                  <Upload size={14} color="var(--accent)" />
+                </div>
+                <div>
+                  <div style={{
+                    fontSize: 'var(--text-xs)', fontWeight: 700,
+                    color: 'var(--text-primary)', marginBottom: 2,
+                  }}>
+                    Upload a PDF first
+                  </div>
+                  <div style={{
+                    fontSize: 'var(--text-xs)',
+                    color: 'var(--text-muted)',
+                    lineHeight: 1.45,
+                  }}>
+                    Drop or upload a document to start chatting.
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
 
         {/* ── Active Document ── */}
         {activeDocument && (

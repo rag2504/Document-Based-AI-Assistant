@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { AnimatePresence } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
+import { MessageSquare, Upload } from 'lucide-react';
 
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
@@ -75,10 +76,14 @@ export default function App() {
   const [hoveredCitationId, setHoveredCitationId] = useState(null);
 
   // Document state
+  const [documents, setDocuments] = useState([]);
   const [activeDoc, setActiveDoc] = useState(() => getStoredDocument());
   const [uploadStatus, setUploadStatus] = useState(activeDoc ? 'success' : 'idle');
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState(null);
+
+  // New Chat Dialog state
+  const [showNewChatDialog, setShowNewChatDialog] = useState(false);
 
   // Chat state
   const [inputValue, setInputValue] = useState('');
@@ -112,6 +117,21 @@ export default function App() {
   // Persist active document
   useEffect(() => { storeDocument(activeDoc); }, [activeDoc]);
 
+  // Sync activeDoc with active conversation
+  useEffect(() => {
+    if (activeConversation && activeConversation.documentName) {
+      const doc = documents.find(d => d.filename === activeConversation.documentName);
+      if (doc) {
+        setActiveDoc({
+          filename: doc.filename,
+          chunks: doc.chunk_count,
+          uploadedAt: doc.uploaded_at,
+        });
+        setUploadStatus('success');
+      }
+    }
+  }, [activeId, activeConversation?.documentName, documents]);
+
   // Load session data on mount
   useEffect(() => {
     async function loadData() {
@@ -119,7 +139,8 @@ export default function App() {
         const response = await axios.get(`${API_BASE}/session/data`);
         if (response.data.success) {
           setServerData(response.data.conversations);
-          if (response.data.documents?.length > 0) {
+          setDocuments(response.data.documents || []);
+          if (!getStoredDocument() && response.data.documents?.length > 0) {
             const latestDoc = response.data.documents[0];
             const docInfo = {
               filename: latestDoc.filename,
@@ -196,6 +217,13 @@ export default function App() {
           chunks: response.data.chunks,
           uploadedAt: new Date().toISOString(),
         };
+        // Add to our documents array if it's new
+        setDocuments(prev => {
+          if (!prev.find(d => d.filename === doc.filename)) {
+            return [{ filename: doc.filename, chunk_count: doc.chunks, uploaded_at: doc.uploadedAt }, ...prev];
+          }
+          return prev;
+        });
         setActiveDoc(doc);
 
         const convId = activeId || createNewChat(response.data.filename);
@@ -346,9 +374,29 @@ export default function App() {
   // ── New Chat ──────────────────────────────────────────────────────────────
   const handleNewChat = useCallback(() => {
     if (activeConversation && activeConversation.messages.length === 0) return;
+    
+    if (activeDoc) {
+      setShowNewChatDialog(true);
+    } else {
+      createNewChat(null);
+      setInputValue('');
+      setUploadStatus('idle');
+    }
+  }, [createNewChat, activeDoc, activeConversation]);
+
+  const confirmNewChatCurrentDoc = () => {
     createNewChat(activeFilename);
     setInputValue('');
-  }, [createNewChat, activeFilename, activeConversation]);
+    setShowNewChatDialog(false);
+  };
+
+  const confirmNewChatNewDoc = () => {
+    createNewChat(null);
+    setInputValue('');
+    setActiveDoc(null);
+    setUploadStatus('idle');
+    setShowNewChatDialog(false);
+  };
 
   useEffect(() => {
     handleNewChatRef.current = handleNewChat;
@@ -497,6 +545,79 @@ export default function App() {
         isOpen={shortcutsOpen}
         onClose={() => setShortcutsOpen(false)}
       />
+
+      {/* ── New Chat Dialog ── */}
+      <AnimatePresence>
+        {showNewChatDialog && (
+          <motion.div
+            className="dialog-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            style={{
+              position: 'fixed', inset: 0,
+              background: 'rgba(0,0,0,0.5)',
+              backdropFilter: 'blur(4px)',
+              zIndex: 9999,
+              display: 'flex', alignItems: 'center', justifyContent: 'center'
+            }}
+            onClick={() => setShowNewChatDialog(false)}
+          >
+            <motion.div
+              className="dialog-content"
+              initial={{ scale: 0.95, y: 10, opacity: 0 }}
+              animate={{ scale: 1, y: 0, opacity: 1 }}
+              exit={{ scale: 0.95, y: 10, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+              style={{
+                background: 'var(--surface)',
+                border: '1px solid var(--border-med)',
+                borderRadius: 'var(--r-xl)',
+                padding: 'var(--sp-6)',
+                width: '100%', maxWidth: '400px',
+                boxShadow: 'var(--s-xl)'
+              }}
+              onClick={e => e.stopPropagation()}
+            >
+              <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 'var(--sp-2)' }}>
+                Start a New Chat
+              </h2>
+              <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', marginBottom: 'var(--sp-6)' }}>
+                Would you like to chat with the current document, or upload a new one?
+              </p>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
+                <button 
+                  onClick={confirmNewChatCurrentDoc}
+                  style={{
+                    background: 'var(--accent)', color: 'white',
+                    padding: 'var(--sp-3)', borderRadius: 'var(--r-md)',
+                    border: 'none', fontWeight: 600, cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
+                  }}
+                >
+                  <MessageSquare size={16} />
+                  Use Current Document
+                </button>
+                <button 
+                  onClick={confirmNewChatNewDoc}
+                  style={{
+                    background: 'var(--surface-raised)', color: 'var(--text-primary)',
+                    border: '1px solid var(--border-strong)',
+                    padding: 'var(--sp-3)', borderRadius: 'var(--r-md)',
+                    fontWeight: 600, cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
+                  }}
+                >
+                  <Upload size={16} />
+                  Upload New Document
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

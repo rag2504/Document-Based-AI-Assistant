@@ -38,23 +38,22 @@ export default function ChatArea({
   const lastAssistantMsg = [...messages].reverse().find(m => m.role === 'assistant');
 
   return (
-    <div className="chat-pane" style={{ position: 'relative', background: 'linear-gradient(145deg, var(--bg-2) 0%, var(--bg) 100%)' }}>
-      {/* Dynamic Grid Background */}
+    <div className="chat-pane" style={{ position: 'relative', background: 'var(--bg)' }}>
+      {/* Dot-grid background */}
       <div
         style={{
           position: 'absolute',
           inset: 0,
-          backgroundImage: 'radial-gradient(var(--border-strong) 1px, transparent 1px)',
+          backgroundImage: 'radial-gradient(circle, var(--border-strong) 1px, transparent 1px)',
           backgroundSize: '24px 24px',
-          opacity: 0.3,
+          opacity: 0.45,
           pointerEvents: 'none',
           zIndex: 0,
         }}
       />
-      
       {/* Subtle Glows */}
-      <div style={{ position: 'absolute', top: -100, left: -100, width: 400, height: 400, background: 'var(--accent)', opacity: 0.06, filter: 'blur(100px)', borderRadius: '50%', pointerEvents: 'none', zIndex: 0 }} />
-      <div style={{ position: 'absolute', bottom: 100, right: -100, width: 400, height: 400, background: '#10b981', opacity: 0.04, filter: 'blur(100px)', borderRadius: '50%', pointerEvents: 'none', zIndex: 0 }} />
+      <div style={{ position: 'absolute', top: -60, left: -60, width: 360, height: 360, background: 'var(--accent)', opacity: 0.07, filter: 'blur(100px)', borderRadius: '50%', pointerEvents: 'none', zIndex: 0 }} />
+      <div style={{ position: 'absolute', bottom: 80, right: -80, width: 360, height: 360, background: '#10b981', opacity: 0.05, filter: 'blur(100px)', borderRadius: '50%', pointerEvents: 'none', zIndex: 0 }} />
 
       <div className="chat-scroll" ref={scrollRef} onScroll={handleScroll} style={{ position: 'relative', zIndex: 1 }}>
         <div className="chat-messages">

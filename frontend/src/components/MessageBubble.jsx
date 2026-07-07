@@ -147,7 +147,7 @@ export default function MessageBubble({ message, onRegenerate, isStreaming, onCi
         animate={{ opacity: 1, x: 0 }}
         transition={{ type: 'spring', stiffness: 500, damping: 40 }}
       >
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, maxWidth: '75%' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
           <div className="msg-user-bubble">{content}</div>
           <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>{formatTime(timestamp)}</span>
         </div>
